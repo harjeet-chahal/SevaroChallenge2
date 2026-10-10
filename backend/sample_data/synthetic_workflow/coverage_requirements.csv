@@ -1,0 +1,7 @@
+hospital_id,block_start,block_end,min_available_physicians
+SRG-H1,07:00,19:00,2
+SRG-H1,19:00,07:00,1
+SRG-H2,07:00,19:00,1
+SRG-H2,19:00,07:00,1
+SRG-H3,00:00,00:00,1
+SRG-H4,00:00,00:00,1

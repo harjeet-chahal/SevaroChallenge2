@@ -1,0 +1,5 @@
+hospital_id,name,timezone,coverage_tier
+SRG-H1,Northgate Sample Hospital,America/New_York,comprehensive
+SRG-H2,Bayside Sample Medical,America/Los_Angeles,primary
+SRG-H3,Ridge Sample Clinic,America/Chicago,primary
+SRG-H4,Lakeshore Sample Center,America/Chicago,primary

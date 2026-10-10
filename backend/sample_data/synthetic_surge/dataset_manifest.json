@@ -1,0 +1,6 @@
+{
+  "label": "SYNTHETIC SAMPLE DATA \u2014 surge & coverage-shortfall scenario",
+  "synthetic": true,
+  "reference_time": "2030-09-10T18:35:00-04:00",
+  "generator": "backend/scripts/generate_surge_dataset.py"
+}

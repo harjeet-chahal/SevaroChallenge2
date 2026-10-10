@@ -1,0 +1,6 @@
+hospital_id,block_start,block_end,min_available_physicians
+STF-H1,07:00,19:00,2
+STF-H1,19:00,07:00,1
+STF-H2,00:00,00:00,1
+STF-H3,00:00,00:00,1
+STF-H4,00:00,00:00,1

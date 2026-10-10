@@ -1,0 +1,6 @@
+{
+  "label": "SYNTHETIC SAMPLE DATA \u2014 surge scenario + split-shift workflow demo",
+  "synthetic": true,
+  "reference_time": "2030-09-10T18:35:00-04:00",
+  "generator": "backend/scripts/generate_workflow_dataset.py"
+}

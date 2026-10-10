@@ -1,0 +1,4 @@
+physician_id,name,role,opt_in,last_shift_ended,next_shift_starts,hours_worked_7d,minutes_to_online,channel,declined_30d
+SRG-P5,Dr. Umber Surge,night,yes,2030-09-10T07:30:00-04:00,2030-09-10T19:30:00-04:00,36,10,sms,0
+SRG-P6,Dr. Vale Surge,float,yes,2030-09-09T19:00:00-05:00,2030-09-12T07:00:00-05:00,24,20,app_push,0
+SRG-P7,Dr. Wren Surge,day,no,2030-09-09T20:00:00-07:00,2030-09-11T08:00:00-07:00,40,30,sms,1

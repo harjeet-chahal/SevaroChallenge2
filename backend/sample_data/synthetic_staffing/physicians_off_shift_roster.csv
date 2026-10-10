@@ -1,0 +1,8 @@
+physician_id,name,role,opt_in,last_shift_ended,next_shift_starts,hours_worked_7d,minutes_to_online,channel,declined_30d
+STF-P6,Dr. Fay Staff,day,no,2031-04-07T23:00:00Z,2031-04-10T12:00:00Z,30,20,sms,0
+STF-P7,Dr. Gil Staff,float,yes,2031-04-08T10:00:00Z,2031-04-09T11:00:00Z,40,15,app_push,0
+STF-P8,Dr. Hal Staff,day,yes,2031-04-08T16:00:00Z,2031-04-09T14:00:00Z,20,10,sms,0
+STF-P9,Dr. Ivy Staff,day,yes,2031-04-07T22:00:00Z,2031-04-10T11:00:00Z,59,10,sms,1
+STF-P10,Dr. Jo Staff,night,yes,2031-04-08T08:00:00Z,2031-04-08T22:30:00Z,36,0,app_push,0
+STF-P11,Dr. Lu Staff,float,yes,2031-04-07T20:00:00Z,2031-04-10T12:00:00Z,24,10,sms,0
+STF-P12,Dr. Mo Staff,day,yes,,2031-04-10T12:00:00Z,30,25,app_push,0

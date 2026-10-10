@@ -1,0 +1,5 @@
+hospital_id,name,timezone,coverage_tier
+STF-H1,Lakeside Sample Hospital,America/New_York,comprehensive
+STF-H2,Prairie Sample Medical,America/Chicago,primary
+STF-H3,Summit Sample Clinic,America/Denver,primary
+STF-H4,Harbor Sample Center,America/New_York,comprehensive

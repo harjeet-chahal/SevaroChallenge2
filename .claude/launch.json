@@ -1,0 +1,49 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "backend-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=sqlite:///./data/demo_phase5.db",
+        "CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001",
+        "APP_ENV=development",
+        "backend/.venv/bin/uvicorn",
+        "--app-dir",
+        "backend",
+        "app.main:app",
+        "--port",
+        "8001"
+      ],
+      "port": 8001
+    },
+    {
+      "name": "frontend-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_API_BASE_URL=http://localhost:8001",
+        "NEXT_PUBLIC_STATUS_POLL_MS=15000",
+        "npm",
+        "--prefix",
+        "frontend",
+        "run",
+        "start",
+        "--",
+        "-p",
+        "3001"
+      ],
+      "port": 3001
+    }
+  ]
+}

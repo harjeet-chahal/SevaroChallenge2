@@ -1,0 +1,7 @@
+physician_id,derived_state,consults,calls,open_consults
+DEV-P01,Video Consult In Progress,6,6,3
+DEV-P02,Incoming Hospital Call,7,7,2
+DEV-P03,Camera Active - No Synapse Session,4,4,1
+DEV-P04,In Meeting,3,3,0
+DEV-P05,Available,3,3,0
+DEV-P06,Temporarily Unavailable,5,4,1

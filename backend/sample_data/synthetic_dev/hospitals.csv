@@ -1,0 +1,6 @@
+hospital_id,name,timezone,coverage_tier
+DEV-H01,Lakeshore Sample Medical Center,America/New_York,comprehensive
+DEV-H02,Prairie Sample Hospital,America/Chicago,primary
+DEV-H03,Mesa Sample Regional,America/Denver,primary
+DEV-H04,Canyon Sample Community,America/Phoenix,acute_ready
+DEV-H05,Harbor Sample General,America/Los_Angeles,comprehensive

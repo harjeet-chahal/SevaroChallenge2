@@ -1,0 +1,11 @@
+consult_id,hospital_id,physician_id,consult_type,stage,minutes_in_stage
+DEV-C101,DEV-H01,DEV-P01,Stroke,Video Consult In Progress,18
+DEV-C102,DEV-H02,DEV-P01,Stroke,CT/CTA or Imaging Pending,24
+DEV-C103,DEV-H03,DEV-P01,General Neuro,Note Pending,80
+DEV-C104,DEV-H04,DEV-P02,Stroke,Provider Contacted,5
+DEV-C105,DEV-H05,DEV-P02,General Neuro,Documentation,20
+DEV-C106,DEV-H02,DEV-P03,General Neuro,Note Pending,70
+DEV-C107,DEV-H05,Unassigned,General Neuro,Triaged,1
+DEV-C108,DEV-H03,DEV-P06,Stroke,Assigned,12
+DEV-C109,DEV-H05,Unassigned,Stroke,Triaged,13
+DEV-C110,DEV-H01,Unassigned,General Neuro,Received,0

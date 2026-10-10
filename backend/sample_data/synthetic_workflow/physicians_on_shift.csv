@@ -1,0 +1,5 @@
+physician_id,name,shift_start,shift_end,role
+SRG-P1,Dr. Quinn Surge,2030-09-10T07:00:00-04:00,2030-09-10T19:00:00-04:00,day
+SRG-P2,Dr. Reese Surge,2030-09-10T07:00:00-04:00,2030-09-10T19:00:00-04:00,day
+SRG-P3,Dr. Sawyer Surge,2030-09-10T11:00:00-04:00,2030-09-10T23:00:00-04:00,day
+SRG-P4,Dr. Taylor Surge,2030-09-10T08:00:00-07:00,2030-09-10T20:00:00-07:00,day

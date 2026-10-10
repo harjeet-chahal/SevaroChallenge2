@@ -1,0 +1,5 @@
+physician_id,name,role,opt_in,last_shift_ended,next_shift_starts,hours_worked_7d,minutes_to_online,channel,declined_30d
+DEV-P07,Dr. Gray Sample,day,yes,2030-05-13T20:00:00-04:00,2030-05-15T08:00:00-04:00,36,15,app_push,1
+DEV-P08,Dr. Harper Sample,night,yes,2030-05-14T07:00:00-04:00,2030-05-14T19:00:00-04:00,48,0,sms,2
+DEV-P09,Dr. Indigo Sample,float,no,2030-05-13T22:00:00-05:00,2030-05-16T07:00:00-05:00,24,10,app_push,0
+DEV-P10,Dr. Jordan Sample,float,yes,2030-05-13T19:00:00-07:00,2030-05-15T07:00:00-07:00,58,30,sms,4

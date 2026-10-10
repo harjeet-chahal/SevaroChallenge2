@@ -1,0 +1,6 @@
+{
+  "label": "SYNTHETIC SAMPLE DATA \u2014 dispatch & split-shift staffing scenario",
+  "synthetic": true,
+  "reference_time": "2031-04-08T17:00:00-04:00",
+  "generator": "backend/scripts/generate_staffing_dataset.py"
+}

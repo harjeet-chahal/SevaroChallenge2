@@ -1,0 +1,7 @@
+{
+  "label": "SYNTHETIC SAMPLE DATA \u2014 Sevaro Pulse development fixture",
+  "synthetic": true,
+  "reference_time": "2030-05-14T17:30:00-04:00",
+  "generator": "backend/scripts/generate_sample_dataset.py",
+  "seed": 20300514
+}
