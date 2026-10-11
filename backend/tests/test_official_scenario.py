@@ -131,6 +131,20 @@ def _staffing(inputs, *, at: datetime = NOW, planning_minutes: int | None = None
 # --- 1. Import and replay ---------------------------------------------------------------
 
 
+def test_bundled_challenge_loads_and_verifies_via_demo_endpoint(client):
+    response = client.post("/api/datasets/challenge")
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert report["synthetic"] is True
+    assert _iso(report["reference_time"]) == NOW
+    assert report["reference_source"] == "snapshot_filename"
+    verification = client.get("/api/datasets/verification").json()
+    assert verification["available"] is True
+    assert verification["compared_entities"] == 26
+    assert verification["compared_fields"] > 0
+    assert verification["mismatches"] == []
+
+
 def test_replay_at_1820_reproduces_both_reference_snapshots(official):
     client, _ = official
     assert _iso(client.get("/api/simulation").json()["current_time"]) == NOW
@@ -420,6 +434,7 @@ def test_every_off_shift_physician_passes_or_fails_the_expected_rules(official):
         (90, set()),
         (100, set()),  # the 20:00 Northfield gap starts exactly at the window end
         (101, {"PHY-009"}),
+        (120, {"PHY-009"}),  # a two-hour window reproduces the handbook candidate count
         (160, {"PHY-009"}),  # the 21:00 Cedar Ridge / Redwood gaps not reached yet
         (161, {"PHY-009", "PHY-010"}),
         (240, {"PHY-009", "PHY-010"}),

@@ -178,6 +178,22 @@ export interface ActiveDataset {
   warnings: number;
 }
 
+export interface SnapshotVerification {
+  available: boolean;
+  as_of: string | null;
+  files: string[];
+  compared_entities: number;
+  compared_fields: number;
+  mismatches: {
+    kind: string;
+    entity_id: string;
+    field: string;
+    expected: unknown;
+    actual: unknown;
+  }[];
+  notes: string[];
+}
+
 export interface DatasetStatus {
   loaded: boolean;
   active: ActiveDataset | null;

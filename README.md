@@ -95,6 +95,14 @@ cd frontend && npx tsc --noEmit && npm run lint && npm run build
 
 ## Demo
 
+For the official Challenge 2 files, open **Coordinator → Dataset & simulation controls
+→ Load challenge dataset**, then **Verify reference snapshots**. The supplied baseline
+matches 26 entities and 174 fields with zero mismatches. This replaces the active day;
+append the judges' new event CSV under **Judge CSV · append to this day** instead.
+
+See [the hackathon demo checklist](docs/hackathon-demo.md) for the judging sequence,
+the separate workflow rehearsal, and the remaining submission priorities.
+
 Phase 5 (load **workflow sample**; details in [docs/workflow.md §12](docs/workflow.md#12-demo)):
 
 1. **Detect**: alert *Ridge Sample Clinic: coverage gap now (0/1)*.

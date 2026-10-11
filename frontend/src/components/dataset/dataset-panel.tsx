@@ -10,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
   Send,
+  ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -27,13 +28,15 @@ import type {
   EventIngestOutcome,
   EventIngestResult,
   ImportIssue,
+  SnapshotVerification,
 } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { ImportReportView, IngestResultView, IssueList } from "./import-report-view";
+import { ImportReportView, IngestResultView, IssueList, VerificationView } from "./import-report-view";
 
 type ActionResult =
+  | { kind: "verification"; verification: SnapshotVerification }
   | { kind: "report"; report: DatasetImportReport }
   | {
       kind: "ingest";
@@ -151,7 +154,7 @@ export function DatasetPanel({ className }: { className?: string }) {
                     ? ` · ${clock.data.events_pending_ingestion} event(s) not yet ingested`
                     : ""
                 }`
-              : "No dataset loaded: load the sample or upload one"}
+              : "Start with the challenge dataset or upload your files"}
           </span>
           <ChevronDown
             className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180"
@@ -161,6 +164,36 @@ export function DatasetPanel({ className }: { className?: string }) {
         <div className="border-t p-4">
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-4">
+              <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <h3 className="text-sm font-semibold">Challenge 2 · judging baseline</h3>
+                <p className="text-sm text-muted-foreground">
+                  Load the supplied developer kit and reconstruct its reference time from the records.
+                  Loading a dataset replaces the current day and its interventions.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={disabled}
+                    onClick={() => run("challenge", async () => ({
+                      kind: "report",
+                      report: await datasetApi.loadChallenge(),
+                    }))}
+                  >
+                    {spinner("challenge") ?? <Database aria-hidden />}
+                    Load challenge dataset
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={disabled || !config?.dataset_loaded}
+                    onClick={() => run("verify", async () => ({
+                      kind: "verification",
+                      verification: await datasetApi.verify(),
+                    }))}
+                  >
+                    {spinner("verify") ?? <ShieldCheck aria-hidden />}
+                    Verify reference snapshots
+                  </Button>
+                </div>
+              </div>
               <div className="space-y-2">
                 <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                   Active dataset {active?.synthetic ? <SyntheticBadge /> : null}
@@ -337,9 +370,13 @@ export function DatasetPanel({ className }: { className?: string }) {
                 </Button>
               </form>
 
-              <details className="rounded-lg border p-3">
-                <summary className="cursor-pointer text-sm font-semibold">Inject events</summary>
+              <details className="rounded-lg border p-3" open>
+                <summary className="cursor-pointer text-sm font-semibold">Judge CSV · append to this day</summary>
                 <div className="mt-3 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Add the judges&apos; event file here to preserve the loaded day and approvals.
+                    Future records become visible when the simulation clock reaches their arrival time.
+                  </p>
                   <form
                     className="space-y-2"
                     onSubmit={(e) => {
@@ -407,6 +444,7 @@ export function DatasetPanel({ className }: { className?: string }) {
           </div>
 
           <div className="mt-4 space-y-3" aria-live="polite">
+            {result?.kind === "verification" ? <VerificationView verification={result.verification} /> : null}
             {result?.kind === "report" ? <ImportReportView report={result.report} /> : null}
             {result?.kind === "ingest" ? (
               <IngestResultView

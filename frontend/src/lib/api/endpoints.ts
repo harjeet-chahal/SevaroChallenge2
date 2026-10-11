@@ -28,6 +28,7 @@ import type {
   PhysicianState,
   ProposedAction,
   SampleDataset,
+  SnapshotVerification,
   SimulationClock,
   StaffingResult,
   WhatIfResult,
@@ -45,6 +46,17 @@ function query(params: Record<string, string | number | boolean | null | undefin
 }
 
 export const datasetApi = {
+  loadChallenge: () =>
+    apiRequest<DatasetImportReport>("/api/datasets/challenge", {
+      method: "POST",
+      timeoutMs: IMPORT_TIMEOUT_MS,
+    }),
+
+  verify: () =>
+    apiRequest<SnapshotVerification>("/api/datasets/verification", {
+      timeoutMs: IMPORT_TIMEOUT_MS,
+    }),
+
   status: (signal?: AbortSignal) => apiRequest<DatasetStatus>("/api/datasets/status", { signal }),
 
   samples: (signal?: AbortSignal) =>

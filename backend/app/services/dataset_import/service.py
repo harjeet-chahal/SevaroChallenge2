@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import BACKEND_ROOT, Settings
 from app.core.errors import AppError, DatasetValidationError, NotFoundError
 from app.core.time import utc_now
 from app.repositories import EventRepository, ReferenceRepository, SystemRepository
@@ -64,6 +64,13 @@ class DatasetService:
     ) -> DatasetImportReport:
         names = ", ".join(name for name, _ in uploads) or "upload"
         return self._run(lambda: collect_files(uploads, self.limits), names, reference_time)
+
+    def import_challenge(self) -> DatasetImportReport:
+        """Load the committed developer kit through the normal validation/replay pipeline."""
+        directory = BACKEND_ROOT.parent / "data"
+        return self._run(
+            lambda: read_directory(directory, self.limits), "Challenge 2 developer kit", None
+        )
 
     def samples(self) -> list[SampleDataset]:
         """Bundled sample datasets: sibling folders of SAMPLE_DATASET_DIR with a manifest."""

@@ -1,0 +1,9 @@
+event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,description
+REHEARSAL-03,2026-03-17T18:19:00-04:00,2026-03-17T18:20:00-04:00,REHEARSAL-C1,consult_triaged,,SYN-010,Stroke consult triaged
+REHEARSAL-01,2026-03-17T18:18:00-04:00,2026-03-17T18:20:00-04:00,REHEARSAL-C1,consult_received,,SYN-010,Stroke consult request received
+REHEARSAL-03,2026-03-17T18:19:00-04:00,2026-03-17T18:20:00-04:00,REHEARSAL-C1,consult_triaged,,SYN-010,Stroke consult triaged
+REHEARSAL-04,2026-03-17T18:20:00-04:00,2026-03-17T18:20:00-04:00,CON-2105,consult_received,,SYN-010,Stroke consult request received again
+REHEARSAL-05,2026-03-17T18:20:00-04:00,2026-03-17T18:20:00-04:00,,physician_status_changed,PHY-004,,Self-reported status: Temporarily Unavailable
+REHEARSAL-06,2026-03-17T18:18:30-04:00,2026-03-17T18:20:00-04:00,REHEARSAL-C2,consult_received,,SYN-010,General Neuro consult request received
+REHEARSAL-07,2026-03-17T18:19:30-04:00,2026-03-17T18:20:00-04:00,REHEARSAL-C2,consult_triaged,,SYN-010,General Neuro consult triaged
+REHEARSAL-08,2026-03-17T18:25:00-04:00,2026-03-17T18:25:00-04:00,,physician_status_changed,PHY-004,,Self-reported status: Available

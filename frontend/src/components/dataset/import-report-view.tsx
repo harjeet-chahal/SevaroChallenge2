@@ -6,6 +6,7 @@ import type {
   FieldIssue,
   ImportIssue,
   IssueSeverity,
+  SnapshotVerification,
 } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,34 @@ function IssueRow({ issue }: { issue: ImportIssue }) {
 }
 
 const ORDER: IssueSeverity[] = ["error", "warning", "info"];
+
+export function VerificationView({ verification: v }: { verification: SnapshotVerification }) {
+  const matched = v.available && v.compared_fields > 0 && v.mismatches.length === 0;
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+      <p className={cn("font-semibold", matched ? "text-success" : "text-warning")}>
+        {matched ? "Reference snapshots match" : v.available ? "Review snapshot verification" : "No reference snapshots available"}
+      </p>
+      <p>
+        {v.compared_entities} entities · {v.compared_fields} fields checked · {v.mismatches.length} mismatches
+        {v.as_of ? ` · at ${formatDateTime(v.as_of)}` : ""}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Checks the replay at the dataset reference time, before intervention changes.
+      </p>
+      {v.notes.map((note, i) => <p key={i} className="text-xs text-muted-foreground">{note}</p>)}
+      {v.mismatches.length > 0 ? (
+        <ul className="max-h-60 space-y-1 overflow-y-auto text-xs">
+          {v.mismatches.map((m, i) => (
+            <li key={i}>
+              {m.kind} {m.entity_id} · {m.field}: expected {JSON.stringify(m.expected)}, got {JSON.stringify(m.actual)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 export function IssueList({ issues }: { issues: ImportIssue[] }) {
   const ordered = [...issues].sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity));

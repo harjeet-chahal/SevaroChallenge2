@@ -66,6 +66,15 @@ async def import_dataset(
 
 
 @router.post(
+    "/challenge",
+    response_model=DatasetImportReport,
+    summary="Load the bundled Challenge 2 developer kit, replacing the active dataset",
+)
+def import_challenge(db: DbSession, settings: AppSettings) -> DatasetImportReport:
+    return DatasetService(db, settings).import_challenge()
+
+
+@router.post(
     "/sample",
     response_model=DatasetImportReport,
     summary="Load the bundled SYNTHETIC SAMPLE DATA (repeatable)",
