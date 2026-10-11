@@ -191,6 +191,7 @@ def last_safe_moment_report(
     cfg: IntelligenceConfig,
     *,
     rescues_in_progress: Mapping[str, list[str]] | None = None,
+    action_lookahead_minutes: int | None = None,
 ) -> LastSafeMomentReport:
     as_of = ctx.as_of
     lead_cfg = cfg.lead
@@ -203,7 +204,11 @@ def last_safe_moment_report(
             continue
         tz = model.tz
         shortfall = pr.first_shortfall
+        action_allowed = action_lookahead_minutes is None or shortfall < as_of + timedelta(
+            minutes=action_lookahead_minutes
+        )
         timings: list[RescueTiming] = []
+        notification_ready: set[str] = set()
         for c in sorted(candidates, key=lambda x: x.physician_id):
             if hid not in c.state.credentialed_hospital_ids:
                 continue
@@ -226,6 +231,8 @@ def last_safe_moment_report(
                 ch for ch in e.checks if not ch.passed and ch.code not in SEND_TIME_RULES
             ]
             send_failed = [ch for ch in e.checks if not ch.passed and ch.code in SEND_TIME_RULES]
+            if not send_failed:
+                notification_ready.add(c.physician_id)
             blocking = [f"{ch.label}: {ch.message}" for ch in [*failed_at_start, *send_failed]]
             eligible_at_start = not failed_at_start and c.earliest_start is not None
             if hid not in e.gap_hospital_ids:
@@ -236,19 +243,33 @@ def last_safe_moment_report(
             covers = False
             crossing = None
             if eligible_at_start and earliest is not None:
-                accept_expected = as_of + timedelta(
+                initiation = as_of
+                if action_lookahead_minutes is not None:
+                    initiation = max(
+                        initiation,
+                        shortfall
+                        - timedelta(minutes=action_lookahead_minutes)
+                        + timedelta(microseconds=1),
+                    )
+                accept_expected = initiation + timedelta(
                     minutes=lead_cfg.approval_minutes + lead_cfg.response_minutes_expected
                 )
                 start_expected = max(earliest, accept_expected)
                 activation = start_expected + timedelta(minutes=online)
                 latest_cons = shortfall - timedelta(minutes=lead.conservative_total_minutes)
                 latest_exp = shortfall - timedelta(minutes=lead.expected_total_minutes)
-                covers = earliest + timedelta(minutes=online) <= shortfall
+                covers = (
+                    max(
+                        earliest + timedelta(minutes=online),
+                        initiation + timedelta(minutes=lead.conservative_total_minutes),
+                    )
+                    <= shortfall
+                )
                 if not covers:
                     latest_cons = latest_exp = None
                     blocking.append(
-                        f"earliest valid start {fmt_local(earliest, tz)} + {online} min online "
-                        f"is after the shortfall at {fmt_local(shortfall, tz)}: can mitigate, "
+                        "earliest permitted rescue cannot be online before the shortfall "
+                        f"at {fmt_local(shortfall, tz)}: can mitigate, "
                         "not prevent"
                     )
                 if earliest > as_of + timedelta(minutes=lead_cfg.approval_minutes):
@@ -267,7 +288,7 @@ def last_safe_moment_report(
                     latest_initiation_conservative=latest_cons,
                     covers_shortfall_start=covers,
                     eligible_at_start=eligible_at_start,
-                    sendable_now=not send_failed,
+                    sendable_now=not send_failed and action_allowed,
                     eligibility_crossing=crossing,
                     blocking=blocking,
                 )
@@ -275,7 +296,9 @@ def last_safe_moment_report(
         usable = [
             t
             for t in timings
-            if t.covers_shortfall_start and t.sendable_now and t.latest_initiation_conservative
+            if t.covers_shortfall_start
+            and t.physician_id in notification_ready
+            and t.latest_initiation_conservative
         ]
         best = max(
             usable,
@@ -288,6 +311,12 @@ def last_safe_moment_report(
         if best is None and any(t.eligible_at_start for t in timings):
             phase = "missed"
         mitigation: list[str] = []
+        if not action_allowed:
+            mitigation.append(
+                f"Planning preview: this gap is outside the {action_lookahead_minutes}-minute "
+                "staffing action window. Keep monitoring; a split-shift contract cannot be "
+                "created yet. Candidates and deadlines are revalidated before action."
+            )
         in_progress = rescues_in_progress.get(hid, [])
         if in_progress:
             mitigation.append(

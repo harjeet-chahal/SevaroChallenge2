@@ -27,6 +27,7 @@ Status: **Done**, **Partial** (works, with a stated limit) or **Not done**.
 | 9 | Coverage Time Machine: deterministic frames at exact boundaries, shift lanes, freshness | `engines/intelligence/time_machine.py`, `/time-machine` | Done |
 | 9.3 | Stochastic layer (seeded NumPy Poisson, sensitivity setting) | `time_machine.py::stochastic_demand` | Done. Labelled as sensitivity, not probability |
 | 10 | Last Safe Moment: lead time, eligibility at the offered start, phases, missed window, mitigation | `engines/intelligence/rescue_planning.py`, `GET /api/intelligence/last-safe-moment` | Done |
+| Integration | Preserve future planning features while incorporating main's shortage look-ahead and linked alert progress | `services/intelligence.py`, `engines/intelligence/simulator.py`, coordinator alert components | Done: future rescue options retain impacts as simulation-only; contracts use operational eligibility |
 | 11 | Network fragility (NetworkX): bipartite graph, single-point failures, multi-failure scenarios, React Flow view | `engines/intelligence/network.py`, `/network` | Done |
 | 12 | Coverage Genome: root causes, exclusive allocation, strategic suggestions | `engines/intelligence/genome.py`, `network.py::_allocation` (Hopcroft-Karp) | Done |
 | 13 | Rescue Scarcity Index | `rescue_planning.py::scarcity_report` | Done |

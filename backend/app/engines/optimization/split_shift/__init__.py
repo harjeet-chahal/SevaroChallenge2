@@ -325,15 +325,27 @@ def run_staffing(
     explanations: list[str] = []
     if not ctx.gap_hospitals:
         explanations.append(
-            f"No hospital has a coverage gap in the next {ctx.horizon_minutes} min; no split "
-            "shift is needed."
+            f"No hospital is short in the next {ctx.lookahead_minutes} min; no split shift is "
+            "needed now."
         )
     else:
         explanations.append(
-            f"Gaps in the next {ctx.horizon_minutes} min at "
-            f"{', '.join(ctx.hospital_name(h) for h in ctx.gap_hospitals)}: "
-            f"{before_total:g} deficit physician-minutes (modeled)."
+            f"Short in the next {ctx.lookahead_minutes} min: "
+            f"{', '.join(ctx.hospital_name(h) for h in ctx.gap_hospitals)}. Deficit over the "
+            f"{ctx.horizon_minutes}-min planning window, including later gaps: "
+            f"{before_total:g} physician-minutes (modeled)."
         )
+    if ctx.later_gaps:
+        explanations.append(
+            "Gaps that start later in the planning window are not acted on yet (re-checked as "
+            "the clock moves): "
+            + ", ".join(
+                f"{ctx.hospital_name(h)} from {fmt_local(at, ctx.tz_for([h]))}"
+                for h, at in ctx.later_gaps.items()
+            )
+            + "."
+        )
+    if ctx.gap_hospitals:
         eligible = [c for c in candidates if c.eligibility.eligible]
         explanations.append(
             f"{len(candidates)} off-shift physicians considered; {len(eligible)} eligible"
@@ -349,8 +361,10 @@ def run_staffing(
         else:
             explanations.append("No eligible offer reduces the deficit.")
     assumptions = [
-        f"Planning window {ctx.horizon_minutes} min (offers last ≥ 2 h), computed with the same "
-        "Phase 3 coverage engine as the dashboard.",
+        f"A hospital counts as short only if its gap starts within {ctx.lookahead_minutes} min "
+        "(the dashboard's coverage forecast window).",
+        f"Offer starts and lengths are planned over {ctx.horizon_minutes} min (offers last "
+        "≥ 2 h), computed with the same Phase 3 coverage engine as the dashboard.",
         "A proposed physician counts at each hospital in their routing scope (non-exclusive, "
         "as the brief defines coverage)"
         if cfg.staffing.count_at_all_scope_hospitals

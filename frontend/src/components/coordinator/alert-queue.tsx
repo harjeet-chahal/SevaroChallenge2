@@ -8,7 +8,12 @@ import { SeverityBadge } from "@/components/shared/severity-badge";
 import { TagBadge } from "@/components/shared/status-badges";
 import { useAnalysis } from "@/components/state/analysis-provider";
 import { StateFallback } from "@/components/state/state-fallback";
-import type { Alert, Severity } from "@/lib/api/types";
+import { InterventionProgressBadge } from "@/components/workflow/status";
+import {
+  ACTION_INTERVENTION_TYPES,
+  useAlertInterventions,
+} from "@/components/workflow/workflow-provider";
+import type { Alert, Intervention, Severity } from "@/lib/api/types";
 import { formatElapsed, formatTime } from "@/lib/format";
 import { ACTION_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -26,8 +31,15 @@ export function alertTiming(a: Alert): string | null {
 
 const FILTERS: (Severity | "all")[] = ["all", "critical", "warning", "info"];
 
+/** True when the recommended intervention is already under way or was completed. */
+export function recommendationActedOn(a: Alert, linked: Intervention[]): boolean {
+  const type = ACTION_INTERVENTION_TYPES[a.recommended_action_type];
+  return linked.some((i) => i.type === type && (!i.is_terminal || i.status === "completed"));
+}
+
 export function AlertQueue({ className }: { className?: string }) {
   const { alerts, selectedAlert, selectAlert } = useAnalysis();
+  const linkedTo = useAlertInterventions();
   const [filter, setFilter] = useState<Severity | "all">("all");
   const data = alerts.data;
   const shown = data?.alerts.filter((a) => filter === "all" || a.severity === filter) ?? [];
@@ -77,6 +89,7 @@ export function AlertQueue({ className }: { className?: string }) {
               {shown.map((a) => {
                 const active = selectedAlert?.alert_id === a.alert_id;
                 const timing = alertTiming(a);
+                const linked = linkedTo(a);
                 return (
                   <li key={a.alert_id}>
                     <button
@@ -123,9 +136,12 @@ export function AlertQueue({ className }: { className?: string }) {
                                 {timing}
                               </span>
                             ) : null}
-                            <TagBadge tone="info">
-                              {ACTION_LABELS[a.recommended_action_type]}
-                            </TagBadge>
+                            {linked[0] ? <InterventionProgressBadge intervention={linked[0]} /> : null}
+                            {recommendationActedOn(a, linked) ? null : (
+                              <TagBadge tone="info">
+                                {ACTION_LABELS[a.recommended_action_type]}
+                              </TagBadge>
+                            )}
                           </div>
                         </div>
                       </div>

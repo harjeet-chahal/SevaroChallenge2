@@ -1,15 +1,16 @@
 # Test report
 
-Run on 10 Oct 2026 (local), macOS, Python 3.14.3, Node 20.20.2.
+Integration validation on 11 Oct 2026 (America/New_York), macOS, Python 3.14.3,
+Node 20.20.2. This updates the original 10 Oct report for main merged into juvana.
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Backend unit, integration, property and regression | `cd backend && .venv/bin/pytest` | **308 passed** (259 existing + 49 NEUROGRID) |
+| Backend unit, integration, property and regression | `cd backend && .venv/bin/pytest` | **310 passed**; final intelligence regression rerun: **50 passed** |
 | Backend lint and format | `ruff check . && ruff format --check .` | clean |
 | Frontend types | `npx tsc --noEmit` | clean |
 | Frontend lint | `npm run lint` | clean |
-| Frontend components (Vitest + RTL) | `npm test` | **6 passed** |
-| End-to-end (Playwright, Chromium) | `npx playwright test` | **5 passed** |
+| Frontend components (Vitest + RTL) | `npm test` | **9 passed** |
+| End-to-end (Playwright, Chromium) | `E2E_API_PORT=18000 E2E_FRONTEND_PORT=13000 npx playwright test` | **Blocked before test bodies**: macOS sandbox denies Chromium MachPortRendezvous startup. Six tests are defined; the original branch reported five passing on 10 Oct. No passing E2E result is claimed for the integration. |
 | Production build | `npm run build` | 11 routes built |
 
 ## What the NEUROGRID tests cover
@@ -51,6 +52,10 @@ official data.
   verdict becomes resolved or partially resolved after activation and is audited. The
   physician role is refused.
 - **Official data.** All 16 chaos scenarios pass.
+- **Main integration.** At 18:20, future Northfield candidates, deadlines, load protection
+  and rescue impact remain visible, but the split shift is simulation-only without a
+  proposal. Direct contract creation is refused. At the exact 18:30 window boundary it
+  remains refused; at 18:31 Okafor becomes actionable and contract creation succeeds.
 
 `frontend/e2e/*.spec.ts` (each run starts from a fresh database):
 
@@ -61,10 +66,30 @@ official data.
   consult is triaged. A malformed CSV is refused and nothing is stored.
 - `chaos-lab`: three scenarios PASS through the UI and the baseline config is unchanged.
 - `approvals`: the clinical lead sees the stale-decision warning after an event arrives.
+- `alert-progress`: linked escalation progress is visible on the alert and another open
+  escalation is disabled. Component tests also cover completed, rejected and unrelated
+  intervention types.
+
+The official-data rescue and approvals E2E tests now advance to 18:31 before creating a
+split shift. The rescue test first checks the simulation-only preview at 18:20. Alternate
+ports start isolated backend/frontend servers with matching CORS, without reusing a
+development server or its database.
+
+## In-app browser inspection
+
+The production build was inspected on separate local test ports. The Command Center,
+future deadlines and simulation-only rescue impacts loaded. At 18:31 the rescue became
+actionable. API-created test interventions appeared in the Clinical Lead view and in
+the alert details as "Clinical escalation · Pending approval"; the duplicate escalation
+control was disabled. This confirms rendering and action-state display, not a passing
+automated browser workflow. A contract-creation attempt from the in-app browser reported
+a network error; the same API proposal succeeded directly (201) and is covered by tests.
 
 ## Chaos Lab on the official data (18:20)
 
-All 16 scenarios pass. Each run takes 170–520 ms on its own branch database.
+All 16 scenarios pass. Workflow fault scenarios advance only their isolated branch clock
+when a forecast gap must enter the 90-minute action window; that step is reported in the
+injected changes. No operational policy is relaxed and the baseline stays unchanged.
 
 ## Known gaps
 

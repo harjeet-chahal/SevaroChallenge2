@@ -256,19 +256,23 @@ offer rules).
 | Real dataset (`data/`) imports | **Fixed.** Header aliases were missing (import failed with 422); ET-labelled blocks and hours are now converted to hospital-local time |
 | Explainable eligibility and projected impact | Compliant: every candidate × every rule, projected before/after, trap analysis |
 
-**Open item, resolved by the official-scenario audit
+**Resolved by the official-scenario audit
 ([official-scenario-audit.md](official-scenario-audit.md)).** Import, time zones and
 replay are correct (0 snapshot mismatches). Coverage is credentialed on-duty capacity:
 busy physicians count. This is supported by the brief ("credentialed capacity below the
 required level") and by the data (counting only free physicians would leave Redwood short
-71% of the day). Under that definition no hospital is short through 19:50. The first gaps
-are Northfield at 20:00, then Cedar Ridge and Redwood at 21:00. The eligible count
-therefore depends only on the split-shift look-ahead:
+71% of the day). Under that definition no hospital is short through 19:50; the first gaps
+are Northfield at 20:00, then Cedar Ridge and Redwood at 21:00.
 
-- 90–100 min: nobody.
-- 101–160 min: PHY-009 only.
-- 240 min (default): PHY-009 and PHY-010, the latter via Redwood's 21:00 gap.
+**Team decision (2026-10-10):** a hospital counts as short for split shifts only if its
+gap starts within the dashboard's 90-minute forecast window
+(`staffing.shortage_lookahead_minutes`, default = the forecast window). Offers are still
+planned over 240 minutes, so they are long enough. Effect on the official data:
+
+- 18:20: nobody can be asked; a split-shift proposal is refused with "monitor or
+  escalate".
+- 18:31–19:30: Dr. Grace Okafor (PHY-009) only, for Northfield.
+- From 19:31: Okafor and Dr. Ben Alvarez (PHY-010).
 
 Suncrest and Oak Valley are routing problems (every credentialed physician busy or
-unavailable), not capacity gaps. The look-ahead is a policy choice
-(`staffing.planning_horizon_minutes`) for the team to make.
+unavailable), handled by escalation or reassignment, not capacity gaps.

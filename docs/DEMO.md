@@ -57,10 +57,12 @@ file name. It never uses the computer's clock.
    Okafor and Alvarez are each the *sole* backup for their hospital. The rule-by-rule
    arithmetic is in Command Center → Recommendations → split shifts.
 
-7. **Simulate.** In the **Rescue Simulator**, with target Northfield:
-   - **#1 Split shift: Dr. Grace Okafor.** Target deficit goes from 120 to 0
+7. **Simulate.** In the **Rescue Simulator**, with target Northfield at 18:20:
+   - **Planning preview: Dr. Grace Okafor.** Target deficit goes from 120 to 0
      physician-minutes. The network deficit drops from 240 to 120, with no new shortfalls.
      The Load Guardian shows 1 modeled consult under protection versus 5 unrestricted.
+     The split shift is **simulation only** with no contract creation yet: the 20:00 gap
+     is outside the operational 90-minute shortage look-ahead. Escalation remains available.
    - **Comparators.** Do nothing and escalation are listed alongside. Four shift
      extensions are marked *simulation only*, and Hannah Cho is *infeasible*.
 
@@ -68,7 +70,10 @@ file name. It never uses the computer's clock.
    16 positions exclusively right now. *Multi-failure* shows that losing the two earliest
    shift-enders leaves Suncrest newly short.
 
-9. **Create the Rescue Contract** with *Create rescue contract* on option #1. Its status
+9. **Open the staffing action window.** Advance the simulation clock by **11 minutes**
+   to **18:31 EDT**. Northfield's 20:00 gap is now inside the 90-minute look-ahead.
+   Okafor's split shift becomes actionable and recommended; Redwood remains a preview.
+   **Create the Rescue Contract** with *Create rescue contract* on Okafor's option. Its status
    becomes `pending_approval` and nobody is contacted yet.
 
 10. **Clinical Lead.** The *Decision freshness lock* banner confirms the data version is
@@ -95,6 +100,9 @@ file name. It never uses the computer's clock.
 
 16. **Optional: Chaos Lab.** Click **Run all**. All 16 scenarios run on temporary branch
     databases with real assertions, and each reports *baseline untouched*. The evaluation
-    table on the same page measures the planning-window deficit as 240 with monitoring
-    only, 103 reactive, and 60 with NEUROGRID. The 60 left over is Cedar Ridge, which has
-    no eligible backup.
+    workflow scenarios advance only their branch clock when needed to enter the staffing
+    action window, and report that step. At the original 18:20 snapshot, the evaluation
+    table measures the planning-window deficit as 240 with monitoring only, 103 reactive,
+    and 60 with NEUROGRID. This modeled comparison waits for the staffing action window
+    before starting future rescues; it does not authorize offers now. The 60 left over is
+    Cedar Ridge, which has no eligible backup. Figures recompute after events or clock moves.

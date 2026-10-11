@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { APIRequestContext } from "@playwright/test";
 
-export const API = "http://localhost:8000";
+export const API = process.env.E2E_API_URL || "http://localhost:8000";
 const ROOT = path.resolve(__dirname, "..", "..");
 const OFFICIAL = path.join(ROOT, "data");
 const SAMPLE = path.join(ROOT, "backend", "sample_data", "synthetic_workflow");

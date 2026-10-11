@@ -5,7 +5,14 @@ import { createContext, useCallback, useContext, useState } from "react";
 import { useSystemStatus } from "@/components/status/system-status-provider";
 import { useKeyedResource, type KeyedResource } from "@/hooks/use-keyed-resource";
 import { workflowApi } from "@/lib/api/endpoints";
-import type { DemoUserRole, InterventionPage, InterventionType } from "@/lib/api/types";
+import type {
+  Alert,
+  DemoUserRole,
+  Intervention,
+  InterventionPage,
+  InterventionType,
+  RecommendedAction,
+} from "@/lib/api/types";
 
 export interface ComposerRequest {
   type: InterventionType;
@@ -87,4 +94,33 @@ export function useWorkflow(): WorkflowContextValue {
 /** The workflow context if present (components shared with pages that have none). */
 export function useOptionalWorkflow(): WorkflowContextValue | null {
   return useContext(WorkflowContext);
+}
+
+/** The intervention type each actionable alert recommendation opens. */
+export const ACTION_INTERVENTION_TYPES: Partial<Record<RecommendedAction, InterventionType>> = {
+  propose_split_shift: "split_shift",
+  escalate: "escalation",
+  reassign_consult: "reassign_consult",
+};
+
+/**
+ * Interventions raised about an alert's problem, newest first: from that alert, or from
+ * another alert about the same consult (e.g. its routing-failure alert). Alerts come from
+ * the live data and stay while the problem does; this lets them show what was already done.
+ */
+export function useAlertInterventions(): (
+  alert: Pick<Alert, "alert_id" | "consult_id">,
+) => Intervention[] {
+  const items = useOptionalWorkflow()?.interventions.data?.items;
+  return useCallback(
+    (alert) =>
+      (items ?? [])
+        .filter(
+          (i) =>
+            i.problem.alert_id === alert.alert_id ||
+            (alert.consult_id !== null && i.problem.consult_id === alert.consult_id),
+        )
+        .sort((a, b) => b.proposed_at.localeCompare(a.proposed_at)),
+    [items],
+  );
 }

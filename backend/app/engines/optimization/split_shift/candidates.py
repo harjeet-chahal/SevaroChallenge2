@@ -48,8 +48,13 @@ class PlanningContext:
     horizon_minutes: int
     models: dict[str, HospitalCoverageModel]
     gap_hospitals: list[str]
+    """Hospitals short within ``lookahead_minutes``: the only ones a split shift may target."""
     base_deficit: dict[str, float]
     tz: str
+    lookahead_minutes: int = 90
+    later_gaps: dict[str, datetime] = field(default_factory=dict)
+    """Hospitals whose first gap starts after the look-ahead but inside the planning window
+    (not acted on yet; re-checked as the clock moves), with that start time."""
     offer_log: dict[str, tuple[int, int]] = field(default_factory=dict)
     """physician_id -> (open offers or committed split shifts, offers sent in the rolling
     7 days), from the Phase 5 workflow tables (see app.services.workflow)."""
@@ -69,14 +74,30 @@ class PlanningContext:
 def build_planning_context(
     analysis: OperationalAnalysis, cfg: OptimizationConfig
 ) -> PlanningContext:
-    """Phase 3 coverage engine re-run over the (longer) staffing planning window."""
+    """Phase 3 coverage engine re-run over the (longer) staffing planning window.
+
+    A hospital is short (a split-shift target) only if its first gap starts within the
+    shortage look-ahead; gaps later in the planning window are reported, not acted on.
+    """
     state = analysis.state
-    horizon = max(cfg.staffing.planning_horizon_minutes, analysis.coverage.horizon_minutes)
+    lookahead = cfg.staffing.shortage_lookahead_minutes or analysis.coverage.horizon_minutes
+    horizon = max(cfg.staffing.planning_horizon_minutes, lookahead)
     models = build_coverage_models(
         state, analysis.reference, analysis.demand_models, analysis.config.coverage, horizon
     )
     base = {hid: round(m.deficit_physician_minutes(), 4) for hid, m in models.items()}
-    gaps = sorted(hid for hid, v in base.items() if v > 0)
+    lookahead_end = state.as_of + timedelta(minutes=lookahead)
+    first_gap = {
+        hid: min(a for a, _, d in m.deficit_profile() if d > 0)
+        for hid, m in models.items()
+        if base[hid] > 0
+    }
+    gaps = sorted(hid for hid, start in first_gap.items() if start < lookahead_end)
+    later = {
+        hid: start
+        for hid, start in sorted(first_gap.items(), key=lambda kv: (kv[1], kv[0]))
+        if hid not in gaps
+    }
     tz = models[gaps[0]].tz if gaps else (state.hospitals[0].timezone if state.hospitals else "UTC")
     return PlanningContext(
         analysis=analysis,
@@ -88,6 +109,8 @@ def build_planning_context(
         gap_hospitals=gaps,
         base_deficit=base,
         tz=tz,
+        lookahead_minutes=lookahead,
+        later_gaps=later,
     )
 
 
@@ -198,7 +221,7 @@ def offer_checks(
     off_scope = [h for h in scope if h not in creds]
     ok = bool(scope) and not off_scope and any(h in ctx.gap_hospitals for h in scope)
     if not ctx.gap_hospitals:
-        msg = "no hospital has a gap in the planning window"
+        msg = f"no hospital is short in the next {ctx.lookahead_minutes} min"
     elif off_scope:
         msg = f"not credentialed at {', '.join(off_scope)}"
     elif not gap_creds:

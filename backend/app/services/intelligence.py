@@ -109,7 +109,20 @@ class IntelligenceService:
         return value
 
     def _staffing(self, analysis: OperationalAnalysis):
-        return self.optimizer.staffing_with_internals(analysis)
+        # Forecast candidates across the full planning window. Only the operational
+        # planner/workflow decides whether an offer is permitted now.
+        cfg = self.optimizer.config().model_copy(deep=True)
+        cfg.staffing.planning_horizon_minutes = max(
+            cfg.staffing.planning_horizon_minutes, self.config().planning_horizon_minutes
+        )
+        cfg.staffing.shortage_lookahead_minutes = cfg.staffing.planning_horizon_minutes
+        return self.optimizer.staffing_with_internals(analysis, config=cfg)
+
+    def _action_lookahead(self, analysis: OperationalAnalysis) -> int:
+        return (
+            self.optimizer.config().staffing.shortage_lookahead_minutes
+            or analysis.coverage.horizon_minutes
+        )
 
     def _routable(self, analysis: OperationalAnalysis) -> dict[str, bool]:
         cfg = self.optimizer.config()
@@ -196,7 +209,15 @@ class IntelligenceService:
 
         def compute() -> ScarcityReport:
             _, internals = self._staffing(analysis)
-            return scarcity_report(internals.ctx, internals.candidates)
+            report = scarcity_report(internals.ctx, internals.candidates)
+            report.policy.insert(
+                0,
+                f"Candidates are evaluated for the {internals.ctx.horizon_minutes}-minute "
+                "planning window. This is a forecast, not permission to send an offer: "
+                f"staffing actions use the {self._action_lookahead(analysis)}-minute "
+                "shortage look-ahead and are revalidated before approval and dispatch.",
+            )
+            return report
 
         return self._cached(self._key("scarcity", analysis), compute)
 
@@ -213,7 +234,11 @@ class IntelligenceService:
                             f"{r['intervention_id']} ({r['status']})"
                         )
             return last_safe_moment_report(
-                internals.ctx, internals.candidates, self.config(), rescues_in_progress=in_progress
+                internals.ctx,
+                internals.candidates,
+                self.config(),
+                rescues_in_progress=in_progress,
+                action_lookahead_minutes=self._action_lookahead(analysis),
             )
 
         return self._cached(self._key("lsm", analysis), compute)
@@ -329,6 +354,7 @@ class IntelligenceService:
         if unknown:
             raise NotFoundError(f"Unknown hospital(s): {', '.join(unknown)}")
         staffing, internals = self._staffing(analysis)
+        action_staffing, action_internals = self.optimizer.staffing_with_internals(analysis)
         if not targets:
             lsm = self.last_safe_moment()
             targets = (
@@ -357,6 +383,9 @@ class IntelligenceService:
                 target_hospital_ids=targets,
                 target_label=label,
                 alert_id=alert_id,
+                action_options=action_internals.options,
+                action_staffing=action_staffing,
+                action_lookahead_minutes=self._action_lookahead(analysis),
             ),
         )
 
@@ -365,7 +394,12 @@ class IntelligenceService:
 
         def compute() -> LoadGuardianReport:
             staffing, internals = self._staffing(analysis)
-            return load_guardian_report(internals.ctx, staffing, internals.options)
+            report = load_guardian_report(internals.ctx, staffing, internals.options)
+            report.conclusion += (
+                " Planning what-if; an actual offer must also pass the operational "
+                f"{self._action_lookahead(analysis)}-minute shortage look-ahead."
+            )
+            return report
 
         return self._cached(self._key("guardian", analysis), compute)
 
@@ -417,7 +451,12 @@ class IntelligenceService:
                 react_start - timedelta(minutes=best.online_minutes) + span,
                 "reactive",
             )
-            neuro_online = timing.activation_expected_at or react_start
+            action_opens = (
+                item.shortfall_at
+                - timedelta(minutes=self._action_lookahead(analysis))
+                + timedelta(microseconds=1)
+            )
+            neuro_online = max(timing.activation_expected_at or react_start, action_opens + lead)
             w_neuro = hypothetical_window(
                 best.physician_id,
                 "",
@@ -489,7 +528,8 @@ class IntelligenceService:
                 reactive=round(reactive_pm, 2),
                 neurogrid=round(neuro_pm, 2),
                 note="Reactive starts the same rescue when the gap begins (lead time "
-                "applies); NEUROGRID starts it now. Same candidate, same rules.",
+                "applies); NEUROGRID starts no earlier than the staffing action window. "
+                "Same candidate, same rules; future eligibility is revalidated before action.",
             ),
             EvaluationRow(
                 metric="Shortfalls fully prevented by the recommended rescue",

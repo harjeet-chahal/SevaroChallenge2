@@ -669,8 +669,39 @@ def no_eligible_backups(branch: Branch, before: OperationalAnalysis, out: Outcom
 # ----------------------------------------------------------------- workflow scenarios --
 
 
-def _gap_plan(branch: Branch):
+def _gap_plan(branch: Branch, out: Outcome, *, min_candidates: int = 1):
     staffing = branch.optimizer().split_shifts()
+    # Workflow fault scenarios need actionable staffing. Advance only the isolated
+    # scenario clock to a forecast gap's action window; never relax the live policy.
+    if (
+        not staffing.recommendations
+        or sum(c.eligible for c in staffing.candidates) < min_candidates
+    ):
+        analysis = branch.analysis()
+        _, internals = branch.optimizer().staffing_with_internals(analysis)
+        now = branch.now()
+        openings = sorted(
+            {
+                start - timedelta(minutes=internals.ctx.lookahead_minutes) + timedelta(minutes=1)
+                for start in internals.ctx.later_gaps.values()
+            }
+        )
+        for opening in openings:
+            if opening <= now:
+                continue
+            SimulationService(branch.session, branch.settings).advance(opening - now)
+            out.injected.append(
+                f"Branch-only clock advanced to {opening.isoformat()} so the forecast "
+                "gap enters the staffing action window (policy unchanged)."
+            )
+            branch.refresh()
+            now = branch.now()
+            staffing = branch.optimizer().split_shifts()
+            if (
+                staffing.recommendations
+                and sum(c.eligible for c in staffing.candidates) >= min_candidates
+            ):
+                break
     if not staffing.recommendations:
         return staffing, None
     return staffing, staffing.recommendations[0]
@@ -689,7 +720,7 @@ def _send(branch: Branch, body: InterventionCreate):
 
 
 def simultaneous_acceptance(branch: Branch, before: OperationalAnalysis, out: Outcome) -> None:
-    staffing, rec = _gap_plan(branch)
+    staffing, rec = _gap_plan(branch, out, min_candidates=2)
     if rec is None:
         out.check("precondition: a recommended split shift", False, "≥ 1", "0")
         return
@@ -760,7 +791,7 @@ def simultaneous_acceptance(branch: Branch, before: OperationalAnalysis, out: Ou
 
 
 def offer_expiry(branch: Branch, before: OperationalAnalysis, out: Outcome) -> None:
-    _staffing, rec = _gap_plan(branch)
+    _staffing, rec = _gap_plan(branch, out)
     if rec is None:
         out.check("precondition: a recommended split shift", False, "≥ 1", "0")
         return
@@ -802,7 +833,7 @@ def offer_expiry(branch: Branch, before: OperationalAnalysis, out: Outcome) -> N
 
 
 def offer_declined(branch: Branch, before: OperationalAnalysis, out: Outcome) -> None:
-    _staffing, rec = _gap_plan(branch)
+    _staffing, rec = _gap_plan(branch, out)
     if rec is None:
         out.check("precondition: a recommended split shift", False, "≥ 1", "0")
         return
@@ -846,7 +877,7 @@ def offer_declined(branch: Branch, before: OperationalAnalysis, out: Outcome) ->
 
 
 def stale_recommendation(branch: Branch, before: OperationalAnalysis, out: Outcome) -> None:
-    _staffing, rec = _gap_plan(branch)
+    _staffing, rec = _gap_plan(branch, out)
     if rec is None:
         out.check("precondition: a recommended split shift", False, "≥ 1", "0")
         return

@@ -138,8 +138,15 @@ is (*E* − 7 d, *E*]. Work that might age out before *E* has unknown timing, so
 
 ### 2.2 Options and model
 
-- **Planning window:** 240 min (CHOICE; offers last ≥ 2 h), computed with the **same Phase 3
-  coverage engine** as the dashboard.
+- **Which hospitals are short (DECISION):** only those whose gap starts within the
+  shortage look-ahead, `staffing.shortage_lookahead_minutes`. By default this is the
+  dashboard's coverage forecast window (90 min, the brief's minimum), so the dashboard and
+  the split-shift rules agree. Gaps later in the planning window are listed as "not acted
+  on yet" and re-checked as the clock moves. See
+  [official-scenario-audit.md](official-scenario-audit.md).
+- **Planning window:** 240 min (CHOICE; offers last ≥ 2 h), used to choose offer starts
+  and lengths and to value them. It is computed with the **same Phase 3 coverage engine**
+  as the dashboard.
 - **Starts:** the earliest valid start, plus "deficit begins minus time to online" for each
   deficit segment at the physician's gap hospitals (finite, ≤ 6).
 - **Lengths:** 120 / 180 / 240 / 360 min. An option that ends exactly at the next
@@ -245,7 +252,9 @@ are in `backend/tests/test_optimization_scenario.py`.
   missing data, one each. CP-SAT offers Gil 21:45–01:45Z (online 22:00Z) for Lakeside and
   Summit, reducing the deficit over 240 min from 195 to 60 physician-minutes. Over the
   90-min dashboard horizon, Lakeside goes from 30 to 0 and Summit from 15 to 0. Prairie's
-  60 remain: its only credentialed candidate has no recorded last shift end.
+  60 remain: its gap starts at 00:00Z, beyond the 90-min shortage look-ahead, so it is
+  not acted on yet. Its only credentialed candidate (Mo) also has no recorded last shift
+  end.
 - **Trap.** Gil is also credentialed at busy Harbor (no gap). Unrestricted routing sends
   him 4 of Harbor's 8 modeled consults; the protected policy sends none.
 

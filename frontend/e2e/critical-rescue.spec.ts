@@ -5,7 +5,18 @@ import { api, loadScenario } from "./helpers";
 interface Option { recommended: boolean; kind: string; physician_ids: string[]; hospital_ids: string[] }
 
 test("detect → simulate → propose → approve → offer → accept → activate → verify", async ({ page, request }) => {
-  await loadScenario(request);
+  const scenario = await loadScenario(request);
+  if (scenario === "official") {
+    // Future rescue impact stays visible before main's action window opens.
+    const preview = await api<{ options: { kind: string; simulation_only: boolean; proposal: unknown; outcome: unknown }[] }>(
+      "/api/intelligence/simulate?hospital_id=SYN-008",
+    );
+    expect(preview.options.some((o) => o.kind === "split_shift" && o.simulation_only && o.outcome && !o.proposal)).toBe(true);
+    await api("/api/simulation/advance", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ minutes: 11 }),
+    });
+  }
   const sim = await api<{ options: Option[]; target_hospital_ids: string[] }>("/api/intelligence/simulate");
   const best = sim.options.find((o) => o.recommended)!;
   expect(best.kind).toBe("split_shift");

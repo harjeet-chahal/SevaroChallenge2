@@ -108,8 +108,14 @@ class StaffingPolicy(BaseModel):
     """CHOICE: finite offer lengths for CP-SAT (all >= the 2-hour minimum)."""
     max_start_options: int = 6
     planning_horizon_minutes: int = 240
-    """CHOICE: offers last >= 2h, so the staffing optimizer plans over a longer window than the
-    90-minute dashboard forecast, using the same Phase 3 coverage engine."""
+    """CHOICE: offers last >= 2h, so offer starts and lengths are planned and valued over a
+    longer window than the 90-minute dashboard forecast, using the same Phase 3 coverage
+    engine. It does not decide which hospitals count as short (see below)."""
+    shortage_lookahead_minutes: int | None = None
+    """DECISION (team, see docs/official-scenario-audit.md): a hospital counts as short for
+    split-shift purposes only if its coverage gap starts within this many minutes. None =
+    the dashboard's coverage forecast window (90 min by default, the brief's minimum), so
+    the dashboard and the split-shift rules always agree on which hospitals are short."""
     count_at_all_scope_hospitals: bool = True
     """BRIEF coverage model: a physician counts toward every hospital they are credentialed at.
     Set false to force each proposed physician to cover exactly one hospital (exclusive)."""

@@ -109,6 +109,9 @@ between Coordinator, Clinical Lead and Physician views. There is no login.
 
 ## Checks
 
+On a fresh checkout, run `npm run build` in `frontend` before standalone `tsc` so Next.js
+generates its route types.
+
 ```bash
 cd backend && .venv/bin/pytest && .venv/bin/ruff check . && .venv/bin/ruff format --check .
 cd frontend && npx tsc --noEmit && npm run lint && npm test && npm run build
@@ -117,6 +120,18 @@ cd frontend && npx playwright install chromium && npx playwright test   # e2e; s
 
 `make install | backend | frontend | demo-data | test | e2e` wrap the same commands.
 `docker-compose.yml` is provided but was not exercised on the build machine.
+
+If development servers already occupy the default ports, run the isolated browser suite
+with `E2E_API_PORT=18000 E2E_FRONTEND_PORT=13000 npx playwright test` from `frontend`.
+
+## Staffing forecasts and actionable rescues
+
+NEUROGRID retains the 240-minute planning views, rescue deadlines, scarcity analysis and
+simulated impacts. Actual split-shift contracts follow the operational shortage look-ahead
+(90 minutes by default). On the official 18:20 snapshot, future rescue options are visible
+as simulation-only; at 18:31, Okafor becomes actionable for Northfield. Approval and
+dispatch revalidate eligibility. Alerts also show linked intervention progress and disable
+another same-type proposal while one remains open. See [docs/DEMO.md](docs/DEMO.md).
 
 ## NEUROGRID API
 

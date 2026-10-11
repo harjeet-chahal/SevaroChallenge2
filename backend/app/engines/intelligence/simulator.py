@@ -166,6 +166,9 @@ def simulate_rescues(
     target_hospital_ids: Sequence[str],
     target_label: str,
     alert_id: str | None = None,
+    action_options: Sequence[Option] | None = None,
+    action_staffing: StaffingResult | None = None,
+    action_lookahead_minutes: int | None = None,
 ) -> RescueSimulation:
     as_of = ctx.as_of
     base = dict(ctx.models)
@@ -262,7 +265,12 @@ def simulate_rescues(
                 )
             )
             continue
-        opt = _best_option_for(c.physician_id, options, ctx, targets)
+        action_opt = (
+            _best_option_for(c.physician_id, action_options, ctx, targets)
+            if action_options is not None
+            else None
+        )
+        opt = action_opt or _best_option_for(c.physician_id, options, ctx, targets)
         if opt is None:
             result.append(
                 RescueOption(
@@ -279,6 +287,7 @@ def simulate_rescues(
             )
             continue
         window = proposed_window(opt)
+        preview_only = action_options is not None and action_opt is None
         after = add_windows(base, {h: [window] for h in opt.hospitals})
         prot = protection_for(opt, ctx, sorted(c.state.credentialed_hospital_ids))
         trap = trap_analysis(ctx, opt, prot)
@@ -293,8 +302,8 @@ def simulate_rescues(
                     f"Split shift: {c.state.display_name} "
                     f"{fmt_local(opt.start, tz)}–{fmt_local(opt.end, tz)}"
                 ),
-                feasible=True,
-                simulation_only=False,
+                feasible=not preview_only,
+                simulation_only=preview_only,
                 requires_approval=True,
                 physician_ids=[c.physician_id],
                 hospital_ids=list(opt.hospitals),
@@ -302,6 +311,15 @@ def simulate_rescues(
                 end_at=opt.end,
                 outcome=_outcome(ctx, base, after, targets, sp_before, opt.online_at),
                 workload=workload,
+                blocking_reasons=(
+                    [
+                        "Planning preview only: no valid operational offer for this target "
+                        f"within the {action_lookahead_minutes}-minute shortage look-ahead. "
+                        "Monitor and re-evaluate as the simulation clock advances."
+                    ]
+                    if preview_only
+                    else []
+                ),
                 why=[
                     f"All split-shift rules pass for {c.state.display_name} at the offered start.",
                     f"Expected online {fmt_local(opt.online_at, tz)} ({c.online_minutes} min to "
@@ -313,7 +331,9 @@ def simulate_rescues(
                     "Acceptance is not assumed; projection shows coverage if accepted.",
                     "Counted as uncertain until the physician is online.",
                 ],
-                proposal={
+                proposal=None
+                if preview_only
+                else {
                     "type": "split_shift",
                     "physician_ids": [c.physician_id],
                     "hospital_ids": list(opt.hospitals),
@@ -324,7 +344,15 @@ def simulate_rescues(
             )
         )
 
-    recs = [r for r in staffing.recommendations if set(r.hospital_ids) & set(targets)]
+    recs = [
+        r
+        for r in (action_staffing or staffing).recommendations
+        if set(r.hospital_ids) & set(targets)
+    ]
+    combination_preview = False
+    if action_staffing is not None and len(recs) < 2:
+        recs = [r for r in staffing.recommendations if set(r.hospital_ids) & set(targets)]
+        combination_preview = True
     if len(recs) >= 2:
         adds: dict[str, list[Window]] = {}
         for r in recs:
@@ -340,14 +368,22 @@ def simulate_rescues(
                 option_id="combination:optimizer",
                 kind="combination",
                 label="Optimizer plan: " + " + ".join(r.display_name for r in recs),
-                feasible=True,
-                simulation_only=False,
+                feasible=not combination_preview,
+                simulation_only=combination_preview,
                 requires_approval=True,
                 physician_ids=[r.physician_id for r in recs],
                 hospital_ids=sorted({h for r in recs for h in r.hospital_ids}),
                 outcome=_outcome(ctx, base, after, targets, sp_before, first_online),
                 why=["CP-SAT staffing plan (Phase 4) restricted to the target hospitals."],
-                proposal={
+                blocking_reasons=[
+                    "Planning preview only: the combined plan is not currently permitted "
+                    f"by the {action_lookahead_minutes}-minute staffing action window."
+                ]
+                if combination_preview
+                else [],
+                proposal=None
+                if combination_preview
+                else {
                     "type": "split_shift",
                     "physician_ids": [r.physician_id for r in recs][:4],
                     "hospital_ids": sorted({h for r in recs for h in r.hospital_ids}),

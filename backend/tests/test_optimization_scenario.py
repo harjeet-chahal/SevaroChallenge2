@@ -15,6 +15,9 @@ H2 short 00:00–01:00 (60), H3 short 22:15–22:30 (15; Jo's night shift from 2
 Gil (P7, online 15 min, credentialed H1/H3) covering 22:00–01:00 needs start ≤ 21:45 and
 end ≥ 01:00: 21:00+240 (excess 315) or 21:45+240 (excess 225) -> 21:45Z for 240 min,
 leaving H2's 60. Over the 90-min dashboard horizon: H1 30 → 0, H3 15 → 0.
+Shortage look-ahead (90 min, 21:00–22:30Z): H1 (from 22:00) and H3 (from 22:15) are short;
+H2's gap starts at 00:00Z, 180 min ahead, so it is reported as a later gap and not acted on
+yet. Mo (P12, credentialed only at H2) therefore also fails credentialing.
 """
 
 from __future__ import annotations
@@ -99,7 +102,7 @@ def test_split_shift_candidates_each_fail_exactly_the_scripted_rule(staffing):
     result = _get(staffing, "split-shifts")
     rows = {c["physician_id"]: c for c in result["candidates"]}
 
-    assert result["gap_hospital_ids"] == ["STF-H1", "STF-H2", "STF-H3"]
+    assert result["gap_hospital_ids"] == ["STF-H1", "STF-H3"]
     assert list(rows) == [f"STF-P{n}" for n in range(6, 13)]
     assert {pid: r["failed_rules"] for pid, r in rows.items()} == {
         "STF-P6": ["opt_in"],
@@ -108,7 +111,7 @@ def test_split_shift_candidates_each_fail_exactly_the_scripted_rule(staffing):
         "STF-P9": ["weekly_hours"],
         "STF-P10": ["no_overlap"],
         "STF-P11": ["credentialed_at_gap"],
-        "STF-P12": ["rest_10h"],
+        "STF-P12": ["credentialed_at_gap", "rest_10h"],
     }
     assert [pid for pid, r in rows.items() if r["eligible"]] == ["STF-P7"]
     rest = next(c for c in rows["STF-P12"]["checks"] if c["code"] == "rest_10h")
@@ -145,7 +148,11 @@ def test_split_shift_plan_matches_hand_calculation(staffing):
     assert dashboard == {"STF-H1": (30, 0), "STF-H3": (15, 0)}
     assert rec["status"] == "proposed" and rec["requires_approval"] is True
     assert result["solver"]["status"] == "OPTIMAL" and result["solver"]["proven_optimal"]
-    assert any("Prairie" in line and "Dr. Mo Staff" in line for line in result["infeasibility"])
+    assert result["infeasibility"] == []  # H1 and H3 fully covered; H2 is not short yet
+    assert any(
+        "not acted on yet" in line and "Prairie Sample Medical from 19:00 CDT" in line
+        for line in result["explanations"]
+    )
 
 
 def test_trap_protection_on_the_sample(staffing):

@@ -96,6 +96,7 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
           Last safe moment · {item.hospital_name}
         </span>
         <Pill tone={phase.tone}>{phase.label}</Pill>
+        {best && !best.sendable_now ? <Pill tone="warning">planning preview</Pill> : null}
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
@@ -120,11 +121,15 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
           Best candidate {best.display_name}: lead {best.lead.conservative_total_minutes} min (approval{" "}
           {best.lead.approval_minutes} + reply ≤ {best.lead.response_minutes_conservative} + online{" "}
           {best.lead.online_minutes}); expected online{" "}
-          {best.activation_expected_at ? formatTime(best.activation_expected_at, item.timezone) : "—"} if started now.
+          {best.activation_expected_at ? formatTime(best.activation_expected_at, item.timezone) : "—"}{" "}
+          {best.sendable_now ? "if started now." : "when staffing action is permitted."}
         </p>
       ) : (
         <p className="text-xs text-critical">{item.mitigation[0] ?? item.explanation}</p>
       )}
+      {compact && best && !best.sendable_now && item.mitigation[0] ? (
+        <p className="text-xs text-muted-foreground">{item.mitigation[0]}</p>
+      ) : null}
       {!compact ? (
         <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
           {item.mitigation.map((m) => (

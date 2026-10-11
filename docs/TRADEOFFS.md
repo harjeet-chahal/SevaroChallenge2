@@ -29,7 +29,11 @@
 
 - **Planning horizon of 240 minutes for planning engines.** The brief's 90-minute
   dashboard window shows no shortfall at 18:20. The planner needs to see the 20:00–21:00
-  cliffs in time to act. Both horizons are shown and labelled.
+  cliffs in time to prepare. Both horizons are shown and labelled. Forecast-only candidate
+  analysis uses the full planning window; operational offers retain main's 90-minute
+  shortage look-ahead. Future options remain visible with impact and workload estimates,
+  but are simulation-only without proposals until the action window opens. Last Safe
+  Moment retains future deadlines while reporting those candidates as not sendable now.
 
 - **Pool coverage stays authoritative.** Exclusive allocation is reported next to it, so
   the gap between the two readings is visible (for example, 7 of 16 positions are

@@ -106,9 +106,11 @@ class OptimizationService:
             ),
         )
 
-    def staffing_with_internals(self, analysis: OperationalAnalysis):
+    def staffing_with_internals(
+        self, analysis: OperationalAnalysis, *, config: OptimizationConfig | None = None
+    ):
         """(StaffingResult, StaffingInternals) for the workflow service's revalidation."""
-        return self._staffing(analysis, self.config())
+        return self._staffing(analysis, config or self.config())
 
     def dispatch_for(self, analysis: OperationalAnalysis) -> DispatchResult:
         return self._dispatch(analysis, self.config())[0]

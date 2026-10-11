@@ -4,7 +4,12 @@ import { ArrowRightLeft, CalendarClock, ClipboardList, Megaphone, PhoneCall } fr
 
 import { PendingActionButton } from "@/components/shared/pending-action-button";
 import { Button } from "@/components/ui/button";
-import { useOptionalWorkflow } from "@/components/workflow/workflow-provider";
+import { InterventionProgressBadge } from "@/components/workflow/status";
+import {
+  ACTION_INTERVENTION_TYPES,
+  useAlertInterventions,
+  useOptionalWorkflow,
+} from "@/components/workflow/workflow-provider";
 import { SectionCard } from "@/components/shared/section-card";
 import { SeverityBadge } from "@/components/shared/severity-badge";
 import { TagBadge } from "@/components/shared/status-badges";
@@ -12,7 +17,7 @@ import { useAnalysis } from "@/components/state/analysis-provider";
 import { StateFallback } from "@/components/state/state-fallback";
 import type { RecommendedAction } from "@/lib/api/types";
 import { formatElapsed, formatTime } from "@/lib/format";
-import { ACTION_LABELS } from "@/lib/labels";
+import { ACTION_LABELS, INTERVENTION_STATUS_LABELS } from "@/lib/labels";
 
 import { alertTiming } from "./alert-queue";
 
@@ -23,12 +28,6 @@ const ACTION_ICONS: Record<RecommendedAction, React.ComponentType<{ className?: 
   propose_split_shift: CalendarClock,
   monitor: ClipboardList,
 };
-
-const ACTION_TYPES = {
-  propose_split_shift: "split_shift",
-  escalate: "escalation",
-  reassign_consult: "reassign_consult",
-} as const;
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -45,6 +44,8 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 export function AlertDetails({ className }: { className?: string }) {
   const { alerts, selectedAlert: a } = useAnalysis();
   const workflow = useOptionalWorkflow();
+  const linkedTo = useAlertInterventions();
+  const linked = a ? linkedTo(a) : [];
 
   return (
     <SectionCard
@@ -145,18 +146,65 @@ export function AlertDetails({ className }: { className?: string }) {
             </Block>
           ) : null}
 
+          {linked.length ? (
+            <Block title="Already done about this problem">
+              <ul className="space-y-1.5">
+                {linked.map((i) => (
+                  <li key={i.id} className="space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                        onClick={() => {
+                          workflow?.select(i.id);
+                          document
+                            .getElementById("intervention-board")
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
+                      >
+                        {i.id}
+                      </button>
+                      <InterventionProgressBadge intervention={i} />
+                      <span className="text-xs text-muted-foreground">
+                        updated {formatTime(i.updated_at, a.hospital_timezone)}
+                      </span>
+                    </div>
+                    {i.status_reason ? (
+                      <p className="text-xs text-muted-foreground">{i.status_reason}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                This alert comes from the live data, so it stays until the problem itself
+                changes (for example, a doctor is assigned to the consult). Completing an
+                escalation records the clinical lead&apos;s action; it does not change the
+                consult.
+              </p>
+            </Block>
+          ) : null}
+
           <Block title="Suggested intervention category">
             <p className="font-medium">{ACTION_LABELS[a.recommended_action_type]}</p>
             <p className="text-xs text-muted-foreground">{a.recommended_action_reason}</p>
             <div className="flex flex-wrap gap-2 pt-1">
               {(["propose_split_shift", "escalate", "reassign_consult"] as const).map((action) => {
                 const Icon = ACTION_ICONS[action];
+                const type = ACTION_INTERVENTION_TYPES[action]!;
+                const open = linked.find((i) => i.type === type && !i.is_terminal);
+                const done = linked.some((i) => i.type === type && i.status === "completed");
                 const label =
                   action === "escalate"
-                    ? "Request escalation"
+                    ? done
+                      ? "Escalate again"
+                      : "Request escalation"
                     : action === "reassign_consult"
-                      ? "Propose reassignment"
-                      : ACTION_LABELS[action];
+                      ? done
+                        ? "Propose another reassignment"
+                        : "Propose reassignment"
+                      : done
+                        ? "Propose another split shift"
+                        : ACTION_LABELS[action];
                 const unavailable =
                   !workflow
                     ? "Open the coordinator view to propose interventions."
@@ -164,7 +212,9 @@ export function AlertDetails({ className }: { className?: string }) {
                       ? "This alert is not about a single consult."
                       : action === "propose_split_shift" && !a.hospital_id
                         ? "This alert is not tied to a hospital's coverage."
-                        : null;
+                        : open
+                          ? `${open.id} is already ${INTERVENTION_STATUS_LABELS[open.status].toLowerCase()}.`
+                          : null;
                 if (unavailable) {
                   return (
                     <PendingActionButton
@@ -180,10 +230,10 @@ export function AlertDetails({ className }: { className?: string }) {
                   <Button
                     key={action}
                     size="sm"
-                    variant={action === a.recommended_action_type ? "default" : "outline"}
+                    variant={action === a.recommended_action_type && !done ? "default" : "outline"}
                     onClick={() =>
                       workflow!.openComposer({
-                        type: ACTION_TYPES[action],
+                        type,
                         alertId: a.alert_id,
                         consultId: a.consult_id,
                         hospitalIds: action === "propose_split_shift" && a.hospital_id ? [a.hospital_id] : undefined,

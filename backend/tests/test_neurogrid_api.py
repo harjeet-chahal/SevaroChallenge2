@@ -211,6 +211,62 @@ def test_rescue_contract_is_verified_only_after_activation(wf):
 
 
 @pytest.mark.skipif(not (DATA / "event_stream.csv").exists(), reason="no official data")
+def test_future_rescue_features_remain_visible_but_follow_main_action_window(tmp_path):
+    client = _client(tmp_path, DATA)
+    try:
+        staffing = client.get("/api/optimization/split-shifts").json()
+        assert staffing["recommendations"] == []
+        lsm = client.get("/api/intelligence/last-safe-moment").json()
+        northfield = next(i for i in lsm["items"] if i["hospital_id"] == "SYN-008")
+        assert northfield["best_physician_id"] == "PHY-009"
+        assert northfield["latest_initiation_at"] is not None
+        assert not any(c["sendable_now"] for c in northfield["candidates"])
+        assert any("cannot be created yet" in m for m in northfield["mitigation"])
+
+        preview = client.get("/api/intelligence/simulate", params={"hospital_id": "SYN-008"}).json()
+        option = next(o for o in preview["options"] if o["physician_ids"] == ["PHY-009"])
+        assert option["simulation_only"] and not option["feasible"]
+        assert option["proposal"] is None and not option["recommended"]
+        assert (
+            option["outcome"]["target_deficit_after"] < option["outcome"]["target_deficit_before"]
+        )
+        assert client.get("/api/intelligence/load-guardian").json()["available"]
+        assert client.get("/api/intelligence/scarcity").json()["entries"]
+        network_sim = client.get(
+            "/api/intelligence/simulate",
+            params=[("hospital_id", i["hospital_id"]) for i in lsm["items"]],
+        ).json()
+        combined = next(o for o in network_sim["options"] if o["kind"] == "combination")
+        assert combined["simulation_only"] and combined["proposal"] is None
+        assert (
+            combined["outcome"]["network_deficit_after"]
+            < combined["outcome"]["network_deficit_before"]
+        )
+        refused = client.post(
+            "/api/interventions",
+            headers=COORD,
+            json={"type": "split_shift", "hospital_ids": ["SYN-008"], "physician_ids": ["PHY-009"]},
+        )
+        assert refused.status_code == 422
+
+        # A gap exactly at the horizon boundary is still outside main's action window.
+        client.post("/api/simulation/advance", json={"minutes": 10})
+        boundary = client.get(
+            "/api/intelligence/simulate", params={"hospital_id": "SYN-008"}
+        ).json()
+        assert all(o["proposal"] is None for o in boundary["options"] if o["kind"] == "split_shift")
+        client.post("/api/simulation/advance", json={"minutes": 1})
+        sim = client.get("/api/intelligence/simulate", params={"hospital_id": "SYN-008"}).json()
+        best = next(o for o in sim["options"] if o["recommended"])
+        assert best["kind"] == "split_shift" and best["physician_ids"] == ["PHY-009"]
+        assert best["feasible"] and not best["simulation_only"]
+        created = client.post("/api/interventions", headers=COORD, json=best["proposal"])
+        assert created.status_code == 201, created.text
+    finally:
+        client.__exit__(None, None, None)
+
+
+@pytest.mark.skipif(not (DATA / "event_stream.csv").exists(), reason="no official data")
 def test_official_chaos_suite_passes(tmp_path):
     client = _client(tmp_path, DATA)
     try:

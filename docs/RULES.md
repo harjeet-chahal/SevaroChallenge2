@@ -55,6 +55,14 @@ signal alerts per physician. Every member alert stays listed, critical ones firs
 
 ## Last Safe Moment
 
+**Planning versus action.** NEUROGRID forecasts candidate capacity over 240 minutes;
+operational staffing targets must have a gap starting inside the configured shortage
+look-ahead (90 minutes by default). A gap exactly at that window's end is excluded.
+Future deadlines and simulated rescue impacts remain visible, but candidates are not
+sendable and their preview options cannot create contracts yet. Approval and dispatch
+still use the operational planner and revalidate every rule. Scarcity and Load Guardian
+reports are planning what-ifs, not permission to contact a physician.
+
     lead_conservative = approval (5) + full offer life (10, brief) + time to come online (roster)
     lead_expected     = approval (5) + expected reply (4) + time to come online
     latest_initiation = shortfall_start − lead_conservative
@@ -130,6 +138,10 @@ Shift extensions are always simulation-only, because the data has no authority t
 shifts and no rest or weekly-hour data for on-shift physicians. When nothing improves the
 target, escalation is recommended if a gap or stranded consult exists; otherwise "do
 nothing" is.
+
+Split shifts outside the operational staffing action window also remain simulation-only.
+Their before/after impacts and combined planning options are retained, but no proposal
+payload is returned. Actionable options use the operational planner's validated windows.
 
 ## Rescue contract phases (derived from intervention status)
 

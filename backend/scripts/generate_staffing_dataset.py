@@ -20,7 +20,9 @@ Staffing (planning window 21:00-01:00Z):
 - STF-H1 short 22:00-23:00Z and 00:00-01:00Z, STF-H2 short 00:00-01:00Z, STF-H3 short
   22:15-22:30Z (a night physician's scheduled shift covers it from 22:30Z).
 - Exactly one off-shift physician (Dr. Gil Staff) passes every rule; six others each fail
-  exactly one: opt-in, rest, weekly hours, overlap, credentialing, missing data.
+  exactly one: opt-in, rest, weekly hours, overlap, credentialing, missing data. (With the
+  90-minute shortage look-ahead, STF-H2 is not short yet at 21:00Z, so Dr. Mo Staff also
+  fails credentialing.)
 - Gil is also credentialed at the busy, gap-free STF-H4: the split-shift trap.
 """
 

@@ -3,7 +3,13 @@ import { expect, test } from "@playwright/test";
 import { api, COORD, loadScenario } from "./helpers";
 
 test("the clinical lead sees a stale-decision warning after state changes under a proposal", async ({ page, request }) => {
-  await loadScenario(request);
+  const scenario = await loadScenario(request);
+  if (scenario === "official") {
+    await api("/api/simulation/advance", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ minutes: 11 }),
+    });
+  }
   const sim = await api<{ options: { recommended: boolean; proposal: Record<string, unknown> | null }[] }>(
     "/api/intelligence/simulate",
   );
