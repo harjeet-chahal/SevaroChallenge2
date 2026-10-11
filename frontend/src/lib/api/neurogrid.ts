@@ -172,6 +172,10 @@ export interface LastSafeMoment {
   latest_initiation_at: string | null;
   remaining_minutes: number | null;
   best_physician_id: string | null;
+  /** The staffing action window (shortage look-ahead) in minutes; offers are only sent inside it. */
+  action_window_minutes: number | null;
+  /** When this shortfall enters the action window; null when it is already inside. */
+  action_window_opens_at: string | null;
   candidates: RescueTiming[];
   mitigation: string[];
   uncertainty: string[];
@@ -480,6 +484,10 @@ export interface RescueOption {
   why: string[];
   uncertainty: string[];
   proposal: Record<string, unknown> | null;
+  /** Future rescue not proposable yet (target gap outside the action window); may become proposable. */
+  planning_preview: boolean;
+  /** For a planning preview: when the target gap enters the action window, if known. */
+  actionable_from: string | null;
 }
 export interface RescueSimulation {
   as_of: string;

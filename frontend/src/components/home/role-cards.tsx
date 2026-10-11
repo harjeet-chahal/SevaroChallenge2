@@ -71,7 +71,7 @@ function CoordinatorPreview() {
     <div className="flex flex-col gap-2.5 rounded-2xl bg-clock-bg p-4 text-clock-fg">
       <div className="flex justify-between gap-2 text-label opacity-70">
         <span className="truncate">Last safe moment{item ? ` · ${item.hospital_name}` : ""}</span>
-        <span>projected</span>
+        <span>live · projected</span>
       </div>
       <div className="flex items-baseline gap-2">
         <span className="font-mono text-[30px] font-medium tracking-[-0.03em] tabular-nums">
@@ -95,7 +95,7 @@ function LeadPreview() {
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-border-subtle bg-card-subtle p-3.5">
       <div className="flex justify-between text-label text-muted-foreground">
-        <span>Pending approvals</span>
+        <span>Pending approvals · live</span>
         <span className="rounded-full bg-warning px-[7px] font-mono font-semibold text-warning-foreground">
           {config?.pending_approvals ?? 0}
         </span>
@@ -123,7 +123,7 @@ function PhysicianPreview() {
     <div className="flex h-[132px] justify-center overflow-hidden rounded-2xl border border-border-subtle bg-card-subtle pt-3">
       <div className="flex w-[190px] flex-col gap-2 rounded-t-[18px] border border-b-0 bg-card p-3">
         <div className="flex justify-between text-[11px] text-muted-foreground">
-          <span>Shift offer</span>
+          <span>Example offer</span>
           <span className="font-mono">10 min to reply</span>
         </div>
         <span className="text-sm font-semibold">Hospitals · hours · reason</span>

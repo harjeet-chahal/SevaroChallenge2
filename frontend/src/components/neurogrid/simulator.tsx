@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeCheck, Ban, FlaskRound, Sparkles, Workflow } from "lucide-react";
+import { BadgeCheck, Ban, Clock, FlaskRound, Sparkles, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -65,12 +65,36 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function OptionCard({ o, onPropose, busy }: { o: RescueOption; onPropose: (o: RescueOption) => void; busy: boolean }) {
+/**
+ * Why an option cannot be proposed now. A planning preview (backend ``planning_preview``) is
+ * a future rescue whose gap is still outside the staffing action window — it may become
+ * proposable later. Any other simulation-only option (e.g. a shift extension) never can.
+ */
+export function previewNote(o: RescueOption): string | null {
+  if (o.planning_preview) {
+    return o.actionable_from
+      ? `Not available to propose yet: it becomes proposable once the gap enters the staffing action window at ${etTime(o.actionable_from)}, and is re-checked then.`
+      : "Not available to propose yet: the gap is outside the staffing action window. It is re-evaluated as the simulation clock advances.";
+  }
+  if (o.simulation_only) return "Comparison only — cannot be proposed.";
+  return null;
+}
+
+export function OptionCard({
+  o,
+  onPropose,
+  busy,
+}: {
+  o: RescueOption;
+  onPropose: (o: RescueOption) => void;
+  busy: boolean;
+}) {
   const out = o.outcome;
   const baseline = o.kind === "do_nothing";
+  const comparisonOnly = o.simulation_only && !o.planning_preview;
   const infeasible = !o.feasible && !o.simulation_only;
   const note = o.simulation_only
-    ? "Evaluated for comparison only — it can never be proposed."
+    ? previewNote(o)
     : infeasible
       ? "Fails a hard eligibility rule; ranked after feasible options."
       : baseline
@@ -85,7 +109,7 @@ function OptionCard({ o, onPropose, busy }: { o: RescueOption; onPropose: (o: Re
           : baseline
             ? "border border-dashed border-border-strong"
             : "border bg-card",
-        (infeasible || o.simulation_only) && "opacity-85",
+        (infeasible || comparisonOnly) && "opacity-85",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -102,9 +126,14 @@ function OptionCard({ o, onPropose, busy }: { o: RescueOption; onPropose: (o: Re
               Recommended
             </Pill>
           ) : null}
-          {o.simulation_only ? (
-            <Pill tone="info" icon={FlaskRound} className="rounded-sm tracking-[0.04em]">
-              Simulation only
+          {o.planning_preview ? (
+            <Pill tone="info" icon={Clock} className="rounded-sm tracking-[0.04em]">
+              Not available to propose yet
+            </Pill>
+          ) : null}
+          {comparisonOnly ? (
+            <Pill tone="muted" icon={FlaskRound} className="rounded-sm tracking-[0.04em]">
+              Comparison only
             </Pill>
           ) : null}
           {infeasible ? (
@@ -150,7 +179,7 @@ function OptionCard({ o, onPropose, busy }: { o: RescueOption; onPropose: (o: Re
           </div>
         </div>
       ) : null}
-      {o.blocking_reasons.length ? (
+      {o.blocking_reasons.length && !o.planning_preview ? (
         <div className="flex flex-wrap gap-1.5">
           {o.blocking_reasons.map((b) => (
             <span key={b} className="rounded-sm border border-border-strong px-2 py-0.5 text-label text-critical-ink">

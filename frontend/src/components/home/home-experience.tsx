@@ -1,6 +1,7 @@
 "use client";
 
-import { Pause, Play } from "lucide-react";
+import { FlaskConical, Pause, Play } from "lucide-react";
+import Link from "next/link";
 
 import { useSystemStatus } from "@/components/status/system-status-provider";
 import { formatHm, zoneAbbr } from "@/lib/format";
@@ -22,17 +23,35 @@ export function HomeExperience() {
 
   return (
     <div className="flex flex-col gap-[72px] pt-1 min-[1200px]:pt-3">
-      <RhythmMonitor loop={loop} simLabel={simLabel} />
+      <div className="flex flex-col gap-3">
+        <div
+          role="note"
+          aria-label="Illustrative demo — not live operational data"
+          className="flex flex-wrap items-start gap-x-3 gap-y-1.5 rounded-xl border border-warning-border bg-warning-soft px-4 py-3"
+        >
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-warning-ink">
+            <FlaskConical className="size-4" aria-hidden />
+            Illustrative demo — not live operational data
+          </span>
+          <span className="text-caption leading-snug text-foreground-2">
+            A scripted replay of one rescue on the official scenario. Its coverage numbers, the offer acceptance and the
+            “recovered · verified” status belong to the story, not to the current state. The replay runs on its own
+            timeline; the live simulation clock stays at <span className="font-mono">{simLabel}</span>. Live figures are
+            in the <Link href="/coordinator" className="text-primary-ink underline-offset-2 hover:underline">Command Center</Link>.
+          </span>
+        </div>
+        <RhythmMonitor loop={loop} />
+      </div>
 
       <section className="grid grid-cols-1 items-center gap-7 min-[1200px]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] min-[1200px]:gap-12">
         <NetworkReplay loop={loop} />
         <div className="flex min-w-0 flex-col gap-[22px]">
           <h2 className="font-serif text-[clamp(40px,4vw,56px)] leading-none font-normal tracking-[-0.02em]">
-            Watch the network <span className="text-primary italic">heal itself.</span>
+            Watch a human-approved rescue <span className="text-primary italic">restore coverage.</span>
           </h2>
           <p className="max-w-[480px] text-[15.5px] leading-relaxed text-foreground-2">
-            The same disruption, seen as a graph — a scripted illustration of the official scenario. Hover nodes to
-            trace credentials; click a step to jump the replay. The live figures are in the operations views.
+            The same scripted disruption, seen as a graph: nothing reaches a physician until a clinical lead approves
+            the rescue. Hover nodes to trace credentials; click a step to jump the replay.
           </p>
           <ol className="flex flex-col gap-0.5">
             {STAGES.map((st, i) => {

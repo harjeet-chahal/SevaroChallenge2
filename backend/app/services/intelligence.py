@@ -101,12 +101,7 @@ class IntelligenceService:
         )
 
     def _cached(self, key: tuple, compute):
-        hit = self.cache.get(key)
-        if hit is not None:
-            return hit
-        value = compute()
-        self.cache.put(key, value)
-        return value
+        return self.cache.get_or_compute(key, compute)
 
     def _staffing(self, analysis: OperationalAnalysis):
         # Forecast candidates across the full planning window. Only the operational

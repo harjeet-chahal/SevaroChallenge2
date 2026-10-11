@@ -353,6 +353,10 @@ class LastSafeMoment(ApiModel):
     """Best candidate, conservative lead time. None when no candidate can cover."""
     remaining_minutes: float | None
     best_physician_id: EntityId | None
+    action_window_minutes: int | None = None
+    """The staffing action window (shortage look-ahead); offers are only sent inside it."""
+    action_window_opens_at: AwareDatetime | None = None
+    """When this shortfall enters the action window; None when it is already inside."""
     candidates: list[RescueTiming]
     mitigation: list[str]
     uncertainty: list[str]
@@ -611,6 +615,12 @@ class RescueOption(ApiModel):
     uncertainty: list[str] = Field(default_factory=list)
     proposal: dict[str, Any] | None = None
     """Body for POST /api/interventions when the option can be proposed."""
+    planning_preview: bool = False
+    """A future rescue that is not proposable yet because its target gap lies outside the
+    staffing action window; it may become proposable as the clock advances. Distinct from
+    a permanently simulation-only option (e.g. a shift extension)."""
+    actionable_from: AwareDatetime | None = None
+    """For a planning preview: when the target gap enters the action window (if known)."""
 
 
 class RescueSimulation(ApiModel):

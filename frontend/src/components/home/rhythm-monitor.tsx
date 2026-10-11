@@ -47,7 +47,7 @@ function vitals(s: number): Vital[] {
     {
       label: "COVERAGE · NORTHFIELD",
       value: healed ? "2/2" : "1/2",
-      sub: s === IDLE ? "required / available" : s === 7 ? "restored" : "below required",
+      sub: s === IDLE ? "required / available" : s === 7 ? "restored" : "projected below required",
       color: stateColor,
       blink: s <= 1,
     },
@@ -84,7 +84,7 @@ function tickColor(i: number, s: number) {
   return RED;
 }
 
-export function RhythmMonitor({ loop, simLabel }: { loop: RescueLoop; simLabel: string }) {
+export function RhythmMonitor({ loop }: { loop: RescueLoop }) {
   const { stage, playing, reduced, stageStart, jump, inject } = loop;
   const canvas = useRef<HTMLCanvasElement>(null);
   const chip = useRef<HTMLSpanElement>(null);
@@ -282,7 +282,7 @@ export function RhythmMonitor({ loop, simLabel }: { loop: RescueLoop; simLabel: 
 
   return (
     <section
-      aria-label="Network rhythm monitor"
+      aria-label="Illustrative network rhythm monitor — scripted demo, not live operational data"
       role="button"
       tabIndex={0}
       onClick={inject}
@@ -307,13 +307,13 @@ export function RhythmMonitor({ loop, simLabel }: { loop: RescueLoop; simLabel: 
     >
       <canvas ref={canvas} aria-hidden className="absolute inset-0 size-full" />
       <p aria-live="polite" className="sr-only">
-        {step ? `Stage 0${stage + 1} ${step.name}: ${step.sentence}` : "Rhythm stable. Activate to inject a disruption."}
+        {step ? `Scripted stage 0${stage + 1} ${step.name}: ${step.sentence}` : "Scripted demo: rhythm stable. Activate to replay a disruption."}
       </p>
 
       <div className="pointer-events-none absolute inset-x-7 top-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3.5 font-mono text-xs tracking-[0.06em] opacity-55">
-          <span className="hidden sm:inline">NEUROGRID · NETWORK RHYTHM · LEAD II</span>
-          <span>SIM {simLabel}</span>
+          <span className="hidden sm:inline">NEUROGRID · NETWORK RHYTHM · SCRIPTED</span>
+          <span>REPLAY {step ? `0${stage + 1}/08` : "—/08"} · not the simulation clock</span>
         </div>
         <span
           key={tone}
@@ -329,11 +329,12 @@ export function RhythmMonitor({ loop, simLabel }: { loop: RescueLoop; simLabel: 
             className={cn("size-[7px] rounded-full", tone === "alarm" ? "animate-[ng-blink_.8s_infinite]" : "animate-ng-pulse [animation-duration:2s]")}
             style={{ background: color }}
           />
-          {STATUS[tone]}
+          Story · {STATUS[tone]}
         </span>
       </div>
 
       <div className="pointer-events-none absolute top-[76px] right-7 hidden w-[230px] flex-col gap-2.5 min-[900px]:flex">
+        <span className="font-mono text-micro tracking-[0.1em] opacity-55">SCRIPTED STORY VALUES</span>
         {vitals(stage).map((v) => (
           <div key={v.label} className="flex flex-col gap-0.5 rounded-[14px] border border-[oklch(0.97_0.008_170/.1)] bg-[oklch(0.97_0.008_170/.05)] px-3.5 py-3">
             <span className="font-mono text-micro tracking-[0.1em] opacity-60">{v.label}</span>

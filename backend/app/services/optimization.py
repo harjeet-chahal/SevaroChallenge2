@@ -74,19 +74,14 @@ class OptimizationService:
         )
 
     def _cached(self, key: tuple, compute):
-        hit = self.cache.get(key)
-        if hit is not None:
-            return hit
         try:
-            value = compute()
+            return self.cache.get_or_compute(key, compute)
         except SolverUnavailableError as exc:
             raise OptimizerUnavailableError(
                 f"{exc}. Install the backend requirements (ortools) or allow the labelled "
                 "fallback (solver.allow_fallback).",
                 details={"ortools_version": ortools_version()},
             ) from exc
-        self.cache.put(key, value)
-        return value
 
     def _dispatch(self, analysis: OperationalAnalysis, cfg: OptimizationConfig):
         return self._cached(

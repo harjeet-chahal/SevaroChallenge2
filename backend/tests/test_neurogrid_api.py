@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,10 @@ ENDPOINTS = [
     "load-guardian",
     "evaluation",
 ]
+
+
+def _ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _client(tmp: Path, folder: Path) -> TestClient:
@@ -222,11 +227,23 @@ def test_future_rescue_features_remain_visible_but_follow_main_action_window(tmp
         assert northfield["latest_initiation_at"] is not None
         assert not any(c["sendable_now"] for c in northfield["candidates"])
         assert any("cannot be created yet" in m for m in northfield["mitigation"])
+        # The deadline says when arranging the rescue becomes permitted (window policy unchanged).
+        assert northfield["action_window_minutes"] == 90
+        opens = _ts(northfield["action_window_opens_at"])
+        assert opens == _ts(northfield["shortfall_at"]) - timedelta(minutes=90)
 
         preview = client.get("/api/intelligence/simulate", params={"hospital_id": "SYN-008"}).json()
         option = next(o for o in preview["options"] if o["physician_ids"] == ["PHY-009"])
         assert option["simulation_only"] and not option["feasible"]
         assert option["proposal"] is None and not option["recommended"]
+        # A future rescue preview is distinguished from a permanently unsupported option.
+        assert option["planning_preview"]
+        assert _ts(option["actionable_from"]) == _ts(northfield["action_window_opens_at"])
+        extensions = [o for o in preview["options"] if o["kind"] == "shift_extension"]
+        assert extensions and all(
+            o["simulation_only"] and not o["planning_preview"] and o["actionable_from"] is None
+            for o in extensions
+        )
         assert (
             option["outcome"]["target_deficit_after"] < option["outcome"]["target_deficit_before"]
         )
@@ -238,6 +255,7 @@ def test_future_rescue_features_remain_visible_but_follow_main_action_window(tmp
         ).json()
         combined = next(o for o in network_sim["options"] if o["kind"] == "combination")
         assert combined["simulation_only"] and combined["proposal"] is None
+        assert combined["planning_preview"]
         assert (
             combined["outcome"]["network_deficit_after"]
             < combined["outcome"]["network_deficit_before"]
@@ -260,6 +278,11 @@ def test_future_rescue_features_remain_visible_but_follow_main_action_window(tmp
         best = next(o for o in sim["options"] if o["recommended"])
         assert best["kind"] == "split_shift" and best["physician_ids"] == ["PHY-009"]
         assert best["feasible"] and not best["simulation_only"]
+        assert not best["planning_preview"] and best["actionable_from"] is None
+        inside = client.get("/api/intelligence/last-safe-moment").json()
+        nf_now = next(i for i in inside["items"] if i["hospital_id"] == "SYN-008")
+        assert nf_now["action_window_opens_at"] is None
+        assert any(c["sendable_now"] for c in nf_now["candidates"])
         created = client.post("/api/interventions", headers=COORD, json=best["proposal"])
         assert created.status_code == 201, created.text
     finally:

@@ -41,7 +41,12 @@ def build_engine(database_url: str) -> Engine:
         if db_path and db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    engine = create_engine(database_url, connect_args=connect_args)
+    pool: dict[str, Any] = {}
+    if database_url.startswith("sqlite") and ":memory:" not in database_url:
+        # Size the pool to uvicorn's worker threadpool (40) so a burst of page loads waits
+        # for CPU rather than failing with a pool timeout. SQLite connections are cheap.
+        pool = {"pool_size": 10, "max_overflow": 40}
+    engine = create_engine(database_url, connect_args=connect_args, **pool)
     if engine.dialect.name == "sqlite":
         event.listen(engine, "connect", _enable_sqlite_foreign_keys)
     return engine

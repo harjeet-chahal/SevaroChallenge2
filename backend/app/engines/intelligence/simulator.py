@@ -178,6 +178,15 @@ def simulate_rescues(
     result: list[RescueOption] = []
 
     nothing = _outcome(ctx, base, base, targets, sp_before, None)
+    target_shortfalls = [
+        f for f in (profiles({h: base[h]})[h].first_shortfall for h in targets) if f is not None
+    ]
+    # When a previewed rescue's target gap enters the staffing action window (if it is
+    # still outside it). Informational only: the window policy itself is unchanged.
+    actionable_from = None
+    if action_lookahead_minutes is not None and target_shortfalls:
+        opens = min(target_shortfalls) - timedelta(minutes=action_lookahead_minutes)
+        actionable_from = opens if opens > as_of else None
     result.append(
         RescueOption(
             option_id="do_nothing",
@@ -304,6 +313,8 @@ def simulate_rescues(
                 ),
                 feasible=not preview_only,
                 simulation_only=preview_only,
+                planning_preview=preview_only,
+                actionable_from=actionable_from if preview_only else None,
                 requires_approval=True,
                 physician_ids=[c.physician_id],
                 hospital_ids=list(opt.hospitals),
@@ -370,6 +381,8 @@ def simulate_rescues(
                 label="Optimizer plan: " + " + ".join(r.display_name for r in recs),
                 feasible=not combination_preview,
                 simulation_only=combination_preview,
+                planning_preview=combination_preview,
+                actionable_from=actionable_from if combination_preview else None,
                 requires_approval=True,
                 physician_ids=[r.physician_id for r in recs],
                 hospital_ids=sorted({h for r in recs for h in r.hospital_ids}),

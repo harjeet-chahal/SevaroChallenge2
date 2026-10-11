@@ -379,6 +379,12 @@ def last_safe_moment_report(
                 latest_initiation_at=latest,
                 remaining_minutes=round(remaining, 2) if remaining is not None else None,
                 best_physician_id=best.physician_id if best else None,
+                action_window_minutes=action_lookahead_minutes,
+                action_window_opens_at=(
+                    None
+                    if action_allowed or action_lookahead_minutes is None
+                    else shortfall - timedelta(minutes=action_lookahead_minutes)
+                ),
                 candidates=timings,
                 mitigation=mitigation,
                 uncertainty=uncertainty,

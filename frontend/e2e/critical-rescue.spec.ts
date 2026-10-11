@@ -12,6 +12,14 @@ test("detect → simulate → propose → approve → offer → accept → activ
       "/api/intelligence/simulate?hospital_id=SYN-008",
     );
     expect(preview.options.some((o) => o.kind === "split_shift" && o.simulation_only && o.outcome && !o.proposal)).toBe(true);
+    // Outside the action window the UI shows a planning preview, never an action "now".
+    await page.goto("/coordinator");
+    await expect(page.getByText("Planning preview").first()).toBeVisible();
+    await expect(page.getByText(/becomes permitted at/).first()).toBeVisible();
+    await page.goto("/simulator?hospital=SYN-008");
+    await expect(page.getByText("Not available to propose yet").first()).toBeVisible();
+    await expect(page.getByText("Comparison only — cannot be proposed.").first()).toBeVisible();
+    await expect(page.getByText(/can never be proposed/)).toHaveCount(0);
     await api("/api/simulation/advance", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ minutes: 11 }),
@@ -49,7 +57,12 @@ test("detect → simulate → propose → approve → offer → accept → activ
   await page.getByRole("button", { name: "Accept" }).first().click();
   await expect(page.getByText(/accepted|confirmed/i).first()).toBeVisible();
 
-  // Not online yet: no recovery may be claimed.
+  // Not online yet: no recovery may be claimed — neither by the API nor in the UI.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/contracts");
+  await expect(page.getByText(/Pending · not yet online/).first()).toBeVisible();
+  await expect(page.getByText(/^Resolved/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Verify & record" })).toHaveCount(0);
   const pending = await api<{ verdict: string }>(
     `/api/rescue-contracts/${(await api<{ items: { id: string }[] }>("/api/interventions", { headers: { "X-Demo-Role": "coordinator" } })).items[0].id}/verification`,
     { headers: { "X-Demo-Role": "coordinator" } },

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import datetime
+from typing import TypeVar
 
 from sqlalchemy.orm import Session
 
@@ -19,12 +21,15 @@ from app.engines.analysis import OperationalAnalysis, analyze
 from app.engines.rules import RiskConfig, load_risk_config
 from app.services.state import StateService
 
+T = TypeVar("T")
+
 
 class AnalysisCache:
     def __init__(self, maxsize: int = 16) -> None:
         self.maxsize = maxsize
         self._items: OrderedDict[tuple, OperationalAnalysis] = OrderedDict()
         self._lock = threading.Lock()
+        self._inflight: dict[tuple, threading.Lock] = {}
 
     def get(self, key: tuple) -> OperationalAnalysis | None:
         with self._lock:
@@ -32,6 +37,28 @@ class AnalysisCache:
             if item is not None:
                 self._items.move_to_end(key)
             return item
+
+    def get_or_compute(self, key: tuple, compute: Callable[[], T]) -> T:
+        """Single-flight: concurrent requests for the same key wait for one computation
+        instead of each recomputing it (a burst of page loads on a cold cache would
+        otherwise multiply the work and hold a database connection per request)."""
+        hit = self.get(key)
+        if hit is not None:
+            return hit  # type: ignore[return-value]
+        with self._lock:
+            key_lock = self._inflight.setdefault(key, threading.Lock())
+        with key_lock:
+            try:
+                hit = self.get(key)
+                if hit is not None:
+                    return hit  # type: ignore[return-value]
+                value = compute()
+                self.put(key, value)  # type: ignore[arg-type]
+                return value
+            finally:
+                with self._lock:
+                    if self._inflight.get(key) is key_lock:
+                        del self._inflight[key]
 
     def clear(self) -> None:
         """Drop everything (after a rolled-back workflow transaction, so no result computed
@@ -69,19 +96,18 @@ class AnalysisService:
         step = step_minutes or config.coverage.chart_step_minutes
         version = self.states.simulation.data_version()
         key = (version, moment.isoformat(), horizon, step, config.signature())
-        cached = self.cache.get(key)
-        if cached is not None:
-            return cached
-        events, reference, version = self.states.load_inputs()
-        result = analyze(
-            events,
-            reference,
-            moment,
-            config,
-            data_version=version,
-            horizon_minutes=horizon,
-            step_minutes=step,
-            overlay=self.states.overlay(),
-        )
-        self.cache.put(key, result)
-        return result
+
+        def compute() -> OperationalAnalysis:
+            events, reference, data_version = self.states.load_inputs()
+            return analyze(
+                events,
+                reference,
+                moment,
+                config,
+                data_version=data_version,
+                horizon_minutes=horizon,
+                step_minutes=step,
+                overlay=self.states.overlay(),
+            )
+
+        return self.cache.get_or_compute(key, compute)

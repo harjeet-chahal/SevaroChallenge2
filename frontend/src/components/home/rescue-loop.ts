@@ -3,15 +3,20 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 /**
- * The scripted rescue story replayed on the Home page (an illustration of the loop on
- * the official scenario — the live figures are in the operations views).
+ * The scripted rescue story replayed on the Home page. It illustrates the loop on the
+ * official scenario; it is not live data (the live figures are in the operations views).
  */
 export const STAGES = [
-  { name: "Detect", sentence: "Northfield drops below required stroke coverage.", status: "Coverage gap detected" },
+  {
+    name: "Detect",
+    sentence: "Northfield is projected to fall below its required coverage at 20:00 EDT.",
+    status: "Projected coverage gap",
+  },
   {
     name: "Diagnose",
-    sentence: "Root cause found: routing eligibility failure. Flow to Northfield has stopped.",
-    status: "Routing eligibility failure",
+    sentence:
+      "Several interacting causes: availability uncertainty, a credentialing bottleneck and a shift collision — as the Coverage Genome reports for Northfield in the official scenario.",
+    status: "Multi-factor root cause",
   },
   {
     name: "Forecast",
@@ -20,19 +25,24 @@ export const STAGES = [
   },
   {
     name: "Decide",
-    sentence: "Off-shift physicians checked against every rule. All but one fail.",
+    sentence: "Off-shift physicians are checked against every rule. Only one can cover Northfield.",
     status: "Candidates checked",
   },
   {
     name: "Simulate",
-    sentence: "Every option replayed on a copy of the network. A split shift with Dr. Okafor ranks first.",
+    sentence:
+      "Every option is replayed on a copy of the network. Once the gap is inside the staffing action window, a split shift with Dr. Okafor ranks first.",
     status: "Options simulated",
   },
-  { name: "Approve", sentence: "The clinical lead approves. Nothing moves without this step.", status: "Awaiting clinical lead" },
-  { name: "Act", sentence: "Offer accepted. Dr. Okafor signs in before the shortfall starts.", status: "Rescue activating" },
+  { name: "Approve", sentence: "A clinical lead approves. Nothing moves without this step.", status: "Awaiting clinical lead" },
+  {
+    name: "Act",
+    sentence: "The offer is accepted — accepted is not yet online. Dr. Okafor then signs in before the shortfall.",
+    status: "Rescue activating",
+  },
   {
     name: "Verify",
-    sentence: "Gap re-measured at 0 phys-min. Recovery verified and recorded.",
+    sentence: "In the story, the gap is re-measured at 0 phys-min and the recovery is recorded.",
     status: "Recovered · gap 0",
   },
 ] as const;

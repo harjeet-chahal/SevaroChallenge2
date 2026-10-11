@@ -127,6 +127,11 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
   const shortIn = Math.max(item.minutes_until_shortfall, 1);
   const frac = rem === null ? 0 : Math.min(1, Math.max(0, rem / shortIn));
   const remText = rem === null ? "—" : rem <= 0 ? "Missed" : fmtMin(rem);
+  // The forecast looks further ahead than offers may be sent: outside the action window
+  // (or while a send-time rule fails) this is a planning preview, not an action.
+  const preview = Boolean(best && !best.sendable_now);
+  const opensAt = item.action_window_opens_at;
+  const onlineAt = best?.activation_expected_at ? `${formatHm(best.activation_expected_at, tz)} ${zone}` : "—";
   return (
     <div
       className={cn(
@@ -138,7 +143,11 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
         <p className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
           Last safe moment · <span className="text-foreground">{item.hospital_name}</span>
         </p>
-        <PhasePill tone={phase.tone} label={phase.label} pulse={urgent} />
+        {preview ? (
+          <PhasePill tone="info" label="Planning preview" />
+        ) : (
+          <PhasePill tone={phase.tone} label={phase.label} pulse={urgent} />
+        )}
       </div>
       {noCandidate ? (
         <p className="text-sm leading-normal">
@@ -195,13 +204,25 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
             </div>
           </div>
           {best ? (
-            <p className="text-[13px] leading-relaxed text-foreground-2 text-pretty">
-              Best candidate {best.display_name}: lead {best.lead.conservative_total_minutes} min (approval{" "}
-              {best.lead.approval_minutes} + reply ≤ {best.lead.response_minutes_conservative} + online{" "}
-              {best.lead.online_minutes}); expected online{" "}
-              {best.activation_expected_at ? `${formatHm(best.activation_expected_at, tz)} ${zone}` : "—"} if started
-              now.
-            </p>
+            <>
+              <p className="text-[13px] leading-relaxed text-foreground-2 text-pretty">
+                Best candidate {best.display_name}: lead {best.lead.conservative_total_minutes} min (approval{" "}
+                {best.lead.approval_minutes} + reply ≤ {best.lead.response_minutes_conservative} + online{" "}
+                {best.lead.online_minutes});{" "}
+                {preview
+                  ? opensAt
+                    ? `expected online ${onlineAt} if arranged when the action window opens.`
+                    : "not sendable right now."
+                  : `expected online ${onlineAt} if started now.`}
+              </p>
+              {preview ? (
+                <p className="rounded-lg border border-info-border bg-info-soft px-3 py-2 text-caption leading-snug text-info-ink">
+                  {opensAt
+                    ? `Planning preview: arranging this rescue becomes permitted at ${formatHm(opensAt, tz)} ${zoneAbbr(opensAt, tz)}, when the gap enters the ${item.action_window_minutes}-minute action window. Candidates and deadlines are re-checked then.`
+                    : `Planning preview: not sendable right now — ${best.blocking[0] ?? "a send-time rule (open offers or weekly offer limit) fails"}.`}
+                </p>
+              ) : null}
+            </>
           ) : (
             <p className="text-[13px] text-critical-ink">{item.mitigation[0] ?? item.explanation}</p>
           )}
@@ -220,7 +241,7 @@ export function DeadlineCard({ item, compact }: { item: LastSafeMoment; compact?
         </span>
         <Button asChild size="sm" variant="secondary">
           <Link href={simulatorHref({ hospital_id: item.hospital_id })}>
-            {noCandidate ? "Escalate to clinical lead" : "Open rescue proposal"} <ArrowRight className="size-4" aria-hidden />
+            {noCandidate ? "Escalate to clinical lead" : preview ? "View rescue preview" : "Open rescue proposal"} <ArrowRight className="size-4" aria-hidden />
           </Link>
         </Button>
       </div>

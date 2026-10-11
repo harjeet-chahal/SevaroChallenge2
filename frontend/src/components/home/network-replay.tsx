@@ -328,7 +328,7 @@ export function NetworkReplay({ loop }: { loop: RescueLoop }) {
         className="absolute inset-0 size-full"
       />
       <div className="pointer-events-none absolute inset-x-5 top-[18px] flex flex-wrap items-center justify-between gap-2.5 text-label text-muted-foreground">
-        <span className="font-mono">10 HOSPITALS · 18 PHYSICIANS · ILLUSTRATIVE</span>
+        <span className="font-mono">ILLUSTRATIVE LAYOUT · NOT THE LIVE NETWORK</span>
         <span className="flex gap-3">
           <span className="flex items-center gap-1.5">
             <span className="size-2 rounded-[2px] bg-faint-foreground" />
