@@ -395,7 +395,7 @@ export function DatasetPanel({ className }: { className?: string }) {
                       onChange={(e) => setInjectJson(e.target.value)}
                       disabled={disabled || !config?.dataset_loaded}
                     />
-                    {jsonError ? <p className="text-xs text-critical">{jsonError}</p> : null}
+                    {jsonError ? <p className="text-xs text-critical-ink">{jsonError}</p> : null}
                     <Button type="submit" size="sm" disabled={disabled || !config?.dataset_loaded}>
                       {spinner("json") ?? <Send aria-hidden />}
                       Inject
@@ -417,12 +417,12 @@ export function DatasetPanel({ className }: { className?: string }) {
             ) : null}
             {result?.kind === "issues" ? (
               <div className="rounded-lg border border-critical-border bg-critical-soft/40 p-3">
-                <p className="text-sm font-semibold text-critical">{result.message}</p>
+                <p className="text-sm font-semibold text-critical-ink">{result.message}</p>
                 <IssueList issues={result.issues} />
               </div>
             ) : null}
             {result?.kind === "message" ? (
-              <p className={result.ok ? "text-sm text-success" : "text-sm text-critical"}>
+              <p className={result.ok ? "text-sm text-success-ink" : "text-sm text-critical-ink"}>
                 {result.message}
               </p>
             ) : null}

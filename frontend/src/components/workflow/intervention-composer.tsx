@@ -129,7 +129,7 @@ export function InterventionComposer({ className }: { className?: string }) {
           </div>
 
           {preview.error ? (
-            <p className="text-sm text-critical" role="alert">
+            <p className="text-sm text-critical-ink" role="alert">
               {preview.error}
             </p>
           ) : null}
@@ -137,12 +137,12 @@ export function InterventionComposer({ className }: { className?: string }) {
           {data && (data.blocking_reasons.length || data.warnings.length) ? (
             <div className="space-y-1 text-sm">
               {data.blocking_reasons.map((r) => (
-                <p key={r} className="rounded-md border border-critical-border bg-critical-soft p-2 text-critical">
+                <p key={r} className="rounded-md border border-critical-border bg-critical-soft p-2 text-critical-ink">
                   {r}
                 </p>
               ))}
               {data.warnings.map((w) => (
-                <p key={w} className="rounded-md border border-warning-border bg-warning-soft p-2 text-warning">
+                <p key={w} className="rounded-md border border-warning-border bg-warning-soft p-2 text-warning-ink">
                   {w}
                 </p>
               ))}

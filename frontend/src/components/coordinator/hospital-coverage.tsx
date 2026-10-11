@@ -237,7 +237,7 @@ export function HospitalCoverage({ className }: { className?: string }) {
                       <TableCell
                         className={cn(
                           "pr-4 text-right tabular-nums",
-                          s.deficit ? "font-semibold text-critical" : "",
+                          s.deficit ? "font-semibold text-critical-ink" : "",
                         )}
                       >
                         {s.deficit ?? "—"}

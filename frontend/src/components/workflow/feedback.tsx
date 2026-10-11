@@ -15,8 +15,8 @@ export function Feedback({ feedback }: { feedback: ActionFeedback | null }) {
       className={cn(
         "flex gap-2 rounded-md border p-2.5 text-sm",
         error
-          ? "border-critical-border bg-critical-soft text-critical"
-          : "border-success-border bg-success-soft text-success",
+          ? "border-critical-border bg-critical-soft text-critical-ink"
+          : "border-success-border bg-success-soft text-success-ink",
       )}
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />

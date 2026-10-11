@@ -70,9 +70,9 @@ function ResultView({ r }: { r: ChaosResult }) {
           {r.assertions.map((a) => (
             <li key={a.name} className="flex items-start gap-2 text-sm">
               {a.passed ? (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-label="pass" />
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success-ink" aria-label="pass" />
               ) : (
-                <XCircle className="mt-0.5 size-4 shrink-0 text-critical" aria-label="fail" />
+                <XCircle className="mt-0.5 size-4 shrink-0 text-critical-ink" aria-label="fail" />
               )}
               <span className="min-w-0">
                 {a.name}
@@ -143,7 +143,7 @@ export function ChaosLab() {
               </p>
             ) : null}
             {error ? (
-              <p role="alert" className="flex items-center gap-2 text-sm text-critical">
+              <p role="alert" className="flex items-center gap-2 text-sm text-critical-ink">
                 <TriangleAlert className="size-4" aria-hidden />
                 {error}
               </p>
@@ -310,7 +310,7 @@ export function DataImport() {
           </Button>
         </div>
         {message ? (
-          <p role="status" className={cn("rounded-md border px-3 py-2 text-sm", message.ok ? "border-success-border bg-success-soft text-success" : "border-critical-border bg-critical-soft text-critical")}>
+          <p role="status" className={cn("rounded-md border px-3 py-2 text-sm", message.ok ? "border-success-border bg-success-soft text-success-ink" : "border-critical-border bg-critical-soft text-critical-ink")}>
             {message.text}
           </p>
         ) : null}

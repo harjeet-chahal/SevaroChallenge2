@@ -64,7 +64,7 @@ function Preview({ action }: { action: SplitShiftAction }) {
   if (!data.allowed) {
     return (
       <div className="space-y-2 rounded-lg border border-critical-border bg-critical-soft/50 p-3">
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-critical">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-critical-ink">
           <TriangleAlert className="size-4" aria-hidden />
           Not allowed — this offer breaks a rule
         </p>

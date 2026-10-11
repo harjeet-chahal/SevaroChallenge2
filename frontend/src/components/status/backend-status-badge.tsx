@@ -4,37 +4,18 @@ import { cn } from "@/lib/utils";
 
 import { useSystemStatus, type Connection } from "./system-status-provider";
 
-const CONNECTION_STYLES: Record<Connection, { label: string; dot: string; chip: string }> = {
-  checking: {
-    label: "Checking API…",
-    dot: "bg-muted-foreground animate-pulse",
-    chip: "border-border bg-muted text-muted-foreground",
-  },
-  online: {
-    label: "API connected",
-    dot: "bg-success",
-    chip: "border-success-border bg-success-soft text-success",
-  },
-  degraded: {
-    label: "API degraded",
-    dot: "bg-warning",
-    chip: "border-warning-border bg-warning-soft text-warning",
-  },
-  offline: {
-    label: "API unreachable",
-    dot: "bg-critical",
-    chip: "border-critical-border bg-critical-soft text-critical",
-  },
+const CONNECTION: Record<Connection, { label: string; dot: string }> = {
+  checking: { label: "Checking backend…", dot: "bg-faint-foreground animate-ng-pulse" },
+  online: { label: "Backend online", dot: "bg-success" },
+  degraded: { label: "Backend degraded", dot: "bg-warning" },
+  offline: { label: "Backend unreachable", dot: "bg-critical animate-ng-pulse" },
 };
 
+/** Connection state as a dot plus text (text from 1280px; always in the tooltip and to AT). */
 export function BackendStatusBadge({ className }: { className?: string }) {
   const { connection, health, error } = useSystemStatus();
-  const style = CONNECTION_STYLES[connection];
-  const title = [
-    style.label,
-    health ? `v${health.version} · ${health.environment}` : null,
-    error,
-  ]
+  const style = CONNECTION[connection];
+  const title = [style.label, health ? `v${health.version} · ${health.environment}` : null, error]
     .filter(Boolean)
     .join(" — ");
 
@@ -43,14 +24,10 @@ export function BackendStatusBadge({ className }: { className?: string }) {
       role="status"
       aria-live="polite"
       title={title}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap",
-        style.chip,
-        className,
-      )}
+      className={cn("inline-flex items-center gap-2 text-caption whitespace-nowrap text-muted-foreground", className)}
     >
       <span aria-hidden className={cn("size-2 rounded-full", style.dot)} />
-      {style.label}
+      <span className="sr-only xl:not-sr-only">{style.label}</span>
     </span>
   );
 }

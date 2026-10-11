@@ -213,7 +213,7 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
         </ul>
       ) : null}
       <div className="flex gap-2 rounded-md border border-success-border bg-success-soft/50 p-2 text-xs">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success-ink" aria-hidden />
         <div className="space-y-0.5">
           <p className="font-semibold text-foreground">
             Routing scope while on the split shift: {item.routing_scope_hospital_ids.join(", ")}

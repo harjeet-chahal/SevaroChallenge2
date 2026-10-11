@@ -101,14 +101,14 @@ export function OfferList() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1 rounded-lg border bg-card p-3">
-        <label htmlFor="simulated-physician" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
+      <div className="space-y-1.5">
+        <label htmlFor="simulated-physician" className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <UserRound className="size-3.5" aria-hidden />
           Signed in as (simulated)
         </label>
         <select
           id="simulated-physician"
-          className="h-10 w-full rounded-md border bg-background px-2 text-base"
+          className="min-h-11 w-full rounded-[10px] border border-border-strong bg-card px-3 text-[15px]"
           value={physicianId ?? ""}
           onChange={(e) => {
             setPicked(e.target.value);
@@ -128,7 +128,7 @@ export function OfferList() {
         </p>
       </div>
 
-      {offers.error ? <p className="text-sm text-critical">{offers.error}</p> : null}
+      {offers.error ? <p className="text-sm text-critical-ink">{offers.error}</p> : null}
       {!offers.data && !offers.error ? (
         <p className="text-sm text-muted-foreground">Loading offers…</p>
       ) : physicianId ? (

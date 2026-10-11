@@ -51,7 +51,7 @@ export function CheckMark({ check, showLabel = false }: { check: RuleCheck; show
       title={`${check.label}: ${check.message}${check.value ? ` (${check.value})` : ""}`}
       className={cn(
         "inline-flex items-center gap-1 text-xs font-medium",
-        check.passed ? "text-success" : missing ? "text-warning" : "text-critical",
+        check.passed ? "text-success-ink" : missing ? "text-warning-ink" : "text-critical-ink",
       )}
     >
       <Icon className="size-3.5 shrink-0" aria-hidden />
@@ -69,7 +69,7 @@ export function urgencyTone(tier: number): "critical" | "warning" | "neutral" {
 
 export function ProposedNote({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-md border border-info-border bg-info-soft px-3 py-2 text-xs text-info">
+    <p className="rounded-md border border-info-border bg-info-soft px-3 py-2 text-xs text-info-ink">
       {children}
     </p>
   );

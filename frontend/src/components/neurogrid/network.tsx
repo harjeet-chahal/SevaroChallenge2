@@ -6,6 +6,7 @@ import { Background, Controls, MarkerType, ReactFlow, type Edge, type Node } fro
 import { Dna, GitFork, Network, ShieldHalf, Split, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useTheme } from "@/components/layout/theme-toggle";
 import { SectionCard } from "@/components/shared/section-card";
 import { SeverityBadge } from "@/components/shared/severity-badge";
 import { useLiveResource } from "@/hooks/use-live-resource";
@@ -58,6 +59,7 @@ function Graph({
   selected: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const theme = useTheme();
   const [hideOff, setHideOff] = useState(true);
   const [risk, setRisk] = useState<"all" | "risk">("all");
   const { nodes, edges } = useMemo(() => {
@@ -159,7 +161,7 @@ function Graph({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          colorMode="dark"
+          colorMode={theme}
           fitView
           nodesDraggable
           nodesConnectable={false}
@@ -287,7 +289,7 @@ export function NetworkIntelligence() {
                       <td className="py-1">{a.label}</td>
                       <td className="text-right tabular-nums">{a.required_total}</td>
                       <td className="text-right tabular-nums">{a.pool_covered}</td>
-                      <td className={cn("text-right tabular-nums", a.exclusive_shortfall > 0 && "text-warning")}>{a.exclusive_covered}</td>
+                      <td className={cn("text-right tabular-nums", a.exclusive_shortfall > 0 && "text-warning-ink")}>{a.exclusive_covered}</td>
                       <td className="pl-3 text-xs text-muted-foreground">{a.unmatched_hospital_ids.join(", ") || "—"}</td>
                     </tr>
                   ))}
@@ -421,7 +423,7 @@ export function ScarcityPanel({ className }: { className?: string }) {
         {(r) => (
           <div className="space-y-3">
             {r.escalation_recommended ? (
-              <p className="rounded-md border border-critical-border bg-critical-soft px-3 py-2 text-sm text-critical">
+              <p className="rounded-md border border-critical-border bg-critical-soft px-3 py-2 text-sm text-critical-ink">
                 No eligible off-shift backup for {r.uncovered_hospital_ids.join(", ")} — escalate.
               </p>
             ) : null}

@@ -1,16 +1,6 @@
 "use client";
 
-import {
-  Building2,
-  Check,
-  Clock,
-  Hourglass,
-  Loader2,
-  MessageSquareText,
-  Power,
-  Timer,
-  X,
-} from "lucide-react";
+import { Check, CircleCheck, Loader2, Power, X } from "lucide-react";
 
 import { TagBadge } from "@/components/shared/status-badges";
 import { Button } from "@/components/ui/button";
@@ -18,30 +8,8 @@ import { Feedback } from "@/components/workflow/feedback";
 import { useAction } from "@/components/workflow/use-action";
 import { offersApi } from "@/lib/api/endpoints";
 import type { OfferStatus, PhysicianOfferView } from "@/lib/api/types";
-import { formatDateTime, formatDuration, formatTime } from "@/lib/format";
+import { formatDay, formatDuration, formatHm, zoneAbbr } from "@/lib/format";
 import { cn } from "@/lib/utils";
-
-function Field({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex gap-3">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="min-w-0">
-        <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {label}
-        </dt>
-        <dd className="text-base font-medium break-words text-foreground">{children}</dd>
-      </div>
-    </div>
-  );
-}
 
 const TONE: Record<OfferStatus, "warning" | "info" | "success" | "neutral"> = {
   sent: "warning",
@@ -78,71 +46,91 @@ export function OfferCard({
         )
       : null;
 
+  const hm = (iso: string) => formatHm(iso, tz);
+  const zone = zoneAbbr(offer.start_at, tz);
+  const onlineBy = offer.expected_online_at ? hm(offer.expected_online_at) : null;
+
   return (
     <article
       aria-label={`Shift offer ${offer.id}`}
       className={cn(
-        "rounded-2xl border bg-card p-4 shadow-xs sm:p-5",
-        offer.status !== "sent" && offer.status !== "accepted" && offer.status !== "active" && "opacity-80",
+        "flex flex-col gap-4 rounded-[18px] border bg-card p-5",
+        offer.status === "accepted" && "border-success-border",
+        offer.status !== "sent" && offer.status !== "accepted" && offer.status !== "active" && "border-dashed opacity-80",
       )}
     >
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold whitespace-nowrap text-foreground">Split-shift offer</h3>
+      <header className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold tracking-[0.1em] whitespace-nowrap text-muted-foreground uppercase">
+          Split-shift offer
+        </h3>
         <TagBadge tone={TONE[offer.status]}>{offer.status_label}</TagBadge>
       </header>
 
-      <dl className="space-y-3">
-        <Field icon={Building2} label={offer.hospitals.length > 1 ? "Hospitals" : "Hospital"}>
+      <div className="flex flex-col gap-1">
+        <span className="text-[22px] leading-tight font-semibold">
           {offer.hospitals.map((hospital) => hospital.name).join(", ")}
-        </Field>
-        <Field icon={Clock} label="Shift">
-          {formatTime(offer.start_at, tz)} – {formatTime(offer.end_at, tz)}
-          <span className="block text-sm font-normal text-muted-foreground">
-            {formatDateTime(offer.start_at, tz)}
-          </span>
-        </Field>
-        <Field icon={Hourglass} label="Total duration">
-          {formatDuration(offer.duration_minutes)}
-        </Field>
-        <Field icon={Power} label="Time to come online">
-          About {offer.minutes_to_online} min
-          {offer.expected_online_at ? (
-            <span className="block text-sm font-normal text-muted-foreground">
-              {offer.activated_at
-                ? `Online since ${formatTime(offer.activated_at, tz)}`
-                : `Expected online ${formatTime(offer.expected_online_at, tz)}`}
-            </span>
-          ) : null}
-        </Field>
-        <Field icon={MessageSquareText} label="Why you were asked">
-          <span className="text-base font-normal">{offer.reason}</span>
-        </Field>
-        <Field icon={Timer} label="Offer expires">
-          {formatTime(offer.expires_at, tz)}
-          {minutesLeft !== null ? (
-            <span className="block text-sm font-normal text-warning">
-              {minutesLeft} simulated min left to reply
-            </span>
-          ) : null}
-        </Field>
-      </dl>
-
-      {offer.message ? (
-        <p className="mt-4 rounded-md border bg-muted/40 p-2 text-sm text-muted-foreground">
-          {offer.message}
-        </p>
-      ) : null}
-
-      <div className="mt-3">
-        <Feedback feedback={feedback} />
+        </span>
+        <span className="font-mono text-[17px] text-foreground-2 tabular-nums">
+          {hm(offer.start_at)} – {hm(offer.end_at)} {zone}
+        </span>
+        <span className="text-caption text-muted-foreground">
+          {formatDay(offer.start_at, tz)} · {formatDuration(offer.duration_minutes)}
+        </span>
       </div>
 
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="flex flex-col gap-1 rounded-xl bg-inset p-3">
+          <span className="text-label text-muted-foreground">
+            {offer.activated_at ? "Online since" : "Come online by"}
+          </span>
+          <span className="font-mono text-xl font-semibold tabular-nums">
+            {offer.activated_at ? hm(offer.activated_at) : (onlineBy ?? `~${offer.minutes_to_online} min`)}
+          </span>
+          <span className="text-label text-muted-foreground">about {offer.minutes_to_online} min to sign in</span>
+        </div>
+        <div className="flex flex-col gap-1 rounded-xl bg-inset p-3">
+          <span className="text-label text-muted-foreground">Reply within</span>
+          <span
+            className={cn(
+              "font-mono text-xl font-semibold tabular-nums",
+              minutesLeft !== null && minutesLeft < 2 && "text-warning-ink",
+            )}
+          >
+            {minutesLeft !== null ? `${minutesLeft} min` : "—"}
+          </span>
+          <span className="text-label text-muted-foreground">expires {hm(offer.expires_at)} · sim clock</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">Why you were asked</span>
+        <span className="text-[14.5px] leading-normal">{offer.reason}</span>
+      </div>
+
+      {offer.status === "accepted" ? (
+        <div className="flex flex-col gap-1.5 rounded-xl border border-success-border bg-success-soft p-3.5">
+          <span className="flex items-center gap-1.5 text-base font-semibold text-success-ink">
+            <CircleCheck className="size-4" aria-hidden />
+            You&apos;re confirmed{onlineBy ? ` — come online by ${onlineBy}` : ""}
+          </span>
+          <span className="text-[13px] leading-snug text-foreground-2">
+            Accepted is not online yet. Your shift becomes active when you sign in.
+          </span>
+        </div>
+      ) : null}
+
+      {offer.message ? (
+        <p className="rounded-xl bg-raised p-3 text-sm text-foreground-2">{offer.message}</p>
+      ) : null}
+
+      <Feedback feedback={feedback} />
+
       {offer.can_accept || offer.can_decline ? (
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2.5">
           <Button
             variant="outline"
             size="lg"
-            className="h-11 w-full text-base"
+            className="h-14 w-full rounded-[14px] text-base active:scale-[.98]"
             disabled={!offer.can_decline || pending !== null}
             onClick={() =>
               run("decline", async () => {
@@ -156,7 +144,7 @@ export function OfferCard({
           </Button>
           <Button
             size="lg"
-            className="h-11 w-full text-base"
+            className="h-14 w-full rounded-[14px] text-base active:scale-[.98]"
             disabled={!offer.can_accept || pending !== null}
             onClick={() =>
               run("accept", async () => {
@@ -174,7 +162,7 @@ export function OfferCard({
       {offer.can_go_online ? (
         <Button
           size="lg"
-          className="mt-4 h-11 w-full text-base"
+          className="h-14 w-full rounded-[14px] text-base"
           disabled={pending !== null}
           onClick={() =>
             run("online", async () => {

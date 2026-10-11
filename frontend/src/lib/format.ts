@@ -60,3 +60,40 @@ export function formatElapsed(seconds: number): string {
 export function formatCount(n: number, singular: string, plural = `${singular}s`): string {
   return `${n} ${n === 1 ? singular : plural}`;
 }
+
+/** "20:00" on a 24-hour clock in the given zone (for mono time readouts). */
+export function formatHm(iso: string, timeZone?: string | null): string {
+  const date = safeDate(iso);
+  if (!date) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: timeZone ?? undefined,
+  }).format(date);
+}
+
+/** Short zone name at that instant, e.g. "EDT" or "PDT". */
+export function zoneAbbr(iso: string, timeZone?: string | null): string {
+  const date = safeDate(iso);
+  if (!date) return "";
+  const part = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "short",
+    timeZone: timeZone ?? undefined,
+  })
+    .formatToParts(date)
+    .find((p) => p.type === "timeZoneName");
+  return part?.value ?? "";
+}
+
+/** "Tue 17 Mar" in the given zone. */
+export function formatDay(iso: string, timeZone?: string | null): string {
+  const date = safeDate(iso);
+  if (!date) return iso;
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: timeZone ?? undefined,
+  }).format(date);
+}

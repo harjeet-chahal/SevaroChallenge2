@@ -71,7 +71,7 @@ function ConsultDetail({ c, names }: { c: ConsultationState; names: Map<string, 
         {c.anomalies.length ? (
           <div>
             <p className="mb-1 font-semibold">Anomalies</p>
-            <ul className="space-y-0.5 text-warning">
+            <ul className="space-y-0.5 text-warning-ink">
               {c.anomalies.map((a, i) => (
                 <li key={i}>{a.message}</li>
               ))}

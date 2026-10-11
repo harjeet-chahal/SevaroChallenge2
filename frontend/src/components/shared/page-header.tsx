@@ -1,24 +1,20 @@
+/** Serif page title and a short description; the sidebar and loop give the context. */
 export function PageHeader({
-  eyebrow,
   title,
   description,
   actions,
 }: {
-  eyebrow?: string;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div className="space-y-1">
-        {eyebrow ? (
-          <p className="text-xs font-semibold tracking-wider text-primary uppercase">{eyebrow}</p>
-        ) : null}
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</h1>
-        {description ? (
-          <p className="max-w-2xl text-sm text-muted-foreground sm:text-base">{description}</p>
-        ) : null}
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex max-w-[760px] flex-col gap-1.5">
+        <h1 className="font-serif text-[34px] leading-[1.05] font-normal tracking-[-0.01em] text-foreground sm:text-[40px]">
+          {title}
+        </h1>
+        {description ? <p className="text-body leading-normal text-foreground-2">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
     </div>

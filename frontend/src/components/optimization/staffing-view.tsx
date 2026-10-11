@@ -130,7 +130,7 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
         })}
       </dl>
       <div className="flex gap-2 rounded-md border border-success-border bg-success-soft/50 p-2 text-xs">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success-ink" aria-hidden />
         <div className="space-y-0.5">
           <p className="font-semibold text-foreground">Split-shift trap protection</p>
           <Bullets items={rec.protection.rationale} className="text-xs" />

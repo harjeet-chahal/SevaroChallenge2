@@ -8,9 +8,9 @@ const chip =
   "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap";
 
 const AVAILABILITY_STYLES: Record<Availability, string> = {
-  busy: "border-critical-border bg-critical-soft text-critical",
-  available: "border-success-border bg-success-soft text-success",
-  unavailable: "border-warning-border bg-warning-soft text-warning",
+  busy: "border-critical-border bg-critical-soft text-critical-ink",
+  available: "border-success-border bg-success-soft text-success-ink",
+  unavailable: "border-warning-border bg-warning-soft text-warning-ink",
   off_shift: "border-border bg-muted text-muted-foreground",
 };
 
@@ -38,7 +38,7 @@ export function StageBadge({ stage, className }: { stage: ConsultStage; classNam
         chip,
         done
           ? "border-border bg-muted text-muted-foreground"
-          : "border-info-border bg-info-soft text-info",
+          : "border-info-border bg-info-soft text-info-ink",
         className,
       )}
     >
@@ -49,7 +49,7 @@ export function StageBadge({ stage, className }: { stage: ConsultStage; classNam
 
 export function SyntheticBadge({ className }: { className?: string }) {
   return (
-    <span className={cn(chip, "border-warning-border bg-warning-soft text-warning", className)}>
+    <span className={cn(chip, "border-warning-border bg-warning-soft text-warning-ink", className)}>
       <FlaskConical className="size-3" aria-hidden />
       SYNTHETIC SAMPLE DATA
     </span>
@@ -67,10 +67,10 @@ export function TagBadge({
 }) {
   const tones = {
     neutral: "border-border bg-muted text-muted-foreground",
-    info: "border-info-border bg-info-soft text-info",
-    warning: "border-warning-border bg-warning-soft text-warning",
-    critical: "border-critical-border bg-critical-soft text-critical",
-    success: "border-success-border bg-success-soft text-success",
+    info: "border-info-border bg-info-soft text-info-ink",
+    warning: "border-warning-border bg-warning-soft text-warning-ink",
+    critical: "border-critical-border bg-critical-soft text-critical-ink",
+    success: "border-success-border bg-success-soft text-success-ink",
   };
   return (
     <span title={title} className={cn(chip, "font-medium", tones[tone])}>

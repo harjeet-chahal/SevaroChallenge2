@@ -81,7 +81,7 @@ export function AuditTrail({
         <History className="size-3.5" aria-hidden />
         Audit trail{audit.data ? ` (${audit.data.total})` : ""}
       </h4>
-      {audit.error ? <p className="text-xs text-critical">{audit.error}</p> : null}
+      {audit.error ? <p className="text-xs text-critical-ink">{audit.error}</p> : null}
       {!audit.data && !audit.error ? (
         <p className="text-xs text-muted-foreground">Loading…</p>
       ) : items.length === 0 ? (

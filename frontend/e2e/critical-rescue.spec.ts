@@ -29,7 +29,7 @@ test("detect → simulate → propose → approve → offer → accept → activ
 
   // Rescue simulator: create the recommended contract.
   await page.goto(`/simulator?hospital=${sim.target_hospital_ids[0]}`);
-  await expect(page.getByText("recommended")).toBeVisible();
+  await expect(page.getByText("Recommended", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Create rescue contract" }).first().click();
   await expect(page.getByText(/created — pending approval/)).toBeVisible();
 

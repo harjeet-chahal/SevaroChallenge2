@@ -159,7 +159,7 @@ export function EventHistory({ className }: { className?: string }) {
             ) : null}
           </form>
 
-          {events.error ? <p className="text-sm text-critical">{events.error}</p> : null}
+          {events.error ? <p className="text-sm text-critical-ink">{events.error}</p> : null}
           {page ? (
             <div className="-mx-4 max-h-[28rem] overflow-auto">
               <Table className="min-w-[760px]">

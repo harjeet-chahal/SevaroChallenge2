@@ -5,7 +5,6 @@ import { OptimizationProvider } from "@/components/optimization/optimization-pro
 import { PageHeader } from "@/components/shared/page-header";
 import { AnalysisProvider } from "@/components/state/analysis-provider";
 import { OperationalStateProvider } from "@/components/state/operational-state-provider";
-import { SimulationStatus } from "@/components/status/simulation-status";
 import { InterventionBoard } from "@/components/workflow/intervention-board";
 import { InterventionComposer } from "@/components/workflow/intervention-composer";
 import { WorkflowProvider } from "@/components/workflow/workflow-provider";
@@ -20,15 +19,13 @@ export default function ContractsPage() {
           <WorkflowProvider role="coordinator">
             <div className="space-y-6">
               <PageHeader
-                eyebrow="Approve · Act · Verify"
                 title="Rescue Contracts"
-                description="Every rescue is an auditable contract: proposal, clinical-lead approval (re-validated against fresh state), simulated offers, responses, activation and verified recovery."
+                description="Each rescue moves through a fixed lifecycle. Accepted is not active: a contract is verified only after the physician is online and the gap is re-measured."
               />
-              <SimulationStatus />
               <ContractVerificationPanel />
+              <ContractAudit />
               <InterventionBoard />
               <InterventionComposer />
-              <ContractAudit />
             </div>
           </WorkflowProvider>
         </OptimizationProvider>

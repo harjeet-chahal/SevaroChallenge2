@@ -98,7 +98,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
           </div>
         ) : null}
         {rec.uncertainty.length ? (
-          <p className="text-xs text-warning">Uncertainty: {rec.uncertainty.join("; ")}.</p>
+          <p className="text-xs text-warning-ink">Uncertainty: {rec.uncertainty.join("; ")}.</p>
         ) : null}
       </Disclosure>
     </li>
@@ -187,9 +187,9 @@ export function RoutingView({ data }: { data: DispatchResult }) {
                     </TableCell>
                     <TableCell className="text-xs whitespace-normal">
                       {p.effective_routing_capacity > 0 ? (
-                        <span className="text-success">Yes</span>
+                        <span className="text-success-ink">Yes</span>
                       ) : (
-                        <span className="text-critical">
+                        <span className="text-critical-ink">
                           No — {blocked?.message ?? "no capacity"}
                         </span>
                       )}

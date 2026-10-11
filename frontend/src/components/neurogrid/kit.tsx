@@ -41,15 +41,16 @@ export function Gate<T>({
   return <EmptyState icon={Spinner} title="Computing…" description={`Running ${feature} on the current state.`} />;
 }
 
-export type Tone = "critical" | "warning" | "success" | "info" | "muted" | "primary";
+export type Tone = "critical" | "serious" | "warning" | "success" | "info" | "muted" | "primary";
 
 const TONES: Record<Tone, string> = {
-  critical: "border-critical-border bg-critical-soft text-critical",
-  warning: "border-warning-border bg-warning-soft text-warning",
-  success: "border-success-border bg-success-soft text-success",
-  info: "border-info-border bg-info-soft text-info",
-  muted: "border-border bg-muted text-muted-foreground",
-  primary: "border-primary/40 bg-primary/10 text-primary",
+  critical: "border-critical-border bg-critical-soft text-critical-ink",
+  serious: "border-serious-border bg-serious-soft text-serious-ink",
+  warning: "border-warning-border bg-warning-soft text-warning-ink",
+  success: "border-success-border bg-success-soft text-success-ink",
+  info: "border-info-border bg-info-soft text-info-ink",
+  muted: "border-border-strong bg-raised text-foreground-2",
+  primary: "border-primary-border bg-primary-soft text-primary-ink",
 };
 
 export function Pill({
@@ -69,7 +70,7 @@ export function Pill({
     <span
       title={title}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-label font-medium whitespace-nowrap",
         TONES[tone],
         className,
       )}
@@ -169,9 +170,9 @@ export function Projected({ className }: { className?: string }) {
 
 export function KeyValue({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
-    <div className="min-w-0 rounded-lg border bg-muted/40 px-3 py-2">
+    <div className="min-w-0 rounded-[10px] bg-inset px-3 py-2.5">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="truncate text-lg font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 font-mono text-lg font-semibold break-words tabular-nums">{value}</p>
       {hint ? <p className="text-[0.7rem] text-muted-foreground">{hint}</p> : null}
     </div>
   );

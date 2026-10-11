@@ -108,7 +108,7 @@ function ChartTooltip({
           <dd
             className={
               row.deficit
-                ? "font-semibold text-critical tabular-nums"
+                ? "font-semibold text-critical-ink tabular-nums"
                 : "font-semibold tabular-nums"
             }
           >
@@ -116,7 +116,7 @@ function ChartTooltip({
           </dd>
         </div>
         {row.spike ? (
-          <p className="pt-0.5 text-warning">Demand-spike adjustment active (+1)</p>
+          <p className="pt-0.5 text-warning-ink">Demand-spike adjustment active (+1)</p>
         ) : null}
       </dl>
     </div>

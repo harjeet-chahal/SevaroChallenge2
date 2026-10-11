@@ -188,7 +188,7 @@ export function InterventionBoard({ className }: { className?: string }) {
         {!config?.dataset_loaded ? (
           <EmptyState compact icon={ListChecks} title="No dataset loaded" />
         ) : interventions.error ? (
-          <p className="text-sm text-critical">{interventions.error}</p>
+          <p className="text-sm text-critical-ink">{interventions.error}</p>
         ) : !interventions.data ? (
           <p className="text-sm text-muted-foreground">Loading interventions…</p>
         ) : items.length === 0 ? (

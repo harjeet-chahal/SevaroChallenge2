@@ -1,6 +1,7 @@
 "use client";
 
 import { CloudOff, Database, Hourglass, Loader2, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 
 import { useSystemStatus } from "@/components/status/system-status-provider";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,11 @@ export function DataEmptyState({
           icon={Database}
           title="No dataset loaded"
           description={whenNoDataset}
-        />
+        >
+          <Button asChild variant="outline" size="sm">
+            <Link href="/import">Open Data Import →</Link>
+          </Button>
+        </EmptyState>
       );
     case "awaiting-feature":
       return (

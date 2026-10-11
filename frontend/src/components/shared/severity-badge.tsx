@@ -9,17 +9,17 @@ const SEVERITY_STYLES: Record<
 > = {
   critical: {
     label: "Critical",
-    className: "border-critical-border bg-critical-soft text-critical",
+    className: "border-critical-border bg-critical-soft text-critical-ink",
     icon: OctagonAlert,
   },
   warning: {
     label: "Warning",
-    className: "border-warning-border bg-warning-soft text-warning",
+    className: "border-warning-border bg-warning-soft text-warning-ink",
     icon: CircleAlert,
   },
   info: {
     label: "Info",
-    className: "border-info-border bg-info-soft text-info",
+    className: "border-info-border bg-info-soft text-info-ink",
     icon: Info,
   },
 };
@@ -30,7 +30,7 @@ export function SeverityBadge({ severity, className }: { severity: Severity; cla
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-label font-medium whitespace-nowrap",
         tone,
         className,
       )}

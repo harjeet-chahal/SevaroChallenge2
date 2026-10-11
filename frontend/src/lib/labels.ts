@@ -126,3 +126,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   intervention_closed_dataset_replaced: "Closed: dataset replaced",
   offer_closed_dataset_replaced: "Offer closed: dataset replaced",
 };
+
+/** Short dataset name: its label, or the file count when the source is a list of CSVs. */
+export function datasetName(active: { label: string | null; source_name: string }): string {
+  if (active.label) return active.label;
+  const files = active.source_name.split(",").filter((f) => f.trim());
+  return files.length > 1 ? `${files.length} CSV files` : active.source_name;
+}

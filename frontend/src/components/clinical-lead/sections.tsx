@@ -38,7 +38,7 @@ function Waiting({ feature }: { feature: string }) {
       />
     );
   }
-  if (interventions.error) return <p className="text-sm text-critical">{interventions.error}</p>;
+  if (interventions.error) return <p className="text-sm text-critical-ink">{interventions.error}</p>;
   return <p className="text-sm text-muted-foreground">Loading…</p>;
 }
 

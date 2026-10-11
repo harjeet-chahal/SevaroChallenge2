@@ -33,7 +33,7 @@ export function CoordinatorSummaryCards() {
   return (
     <section
       aria-label="Network summary"
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+      className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,170px),1fr))] gap-3"
     >
       <MetricCard
         label="Physicians on shift"
@@ -55,6 +55,7 @@ export function CoordinatorSummaryCards() {
         label="Unassigned consults"
         value={summary?.consults_open_unassigned ?? null}
         hint={summary ? "Open with no physician" : hint}
+        risk={(summary?.consults_open_unassigned ?? 0) > 0}
         icon={UserX}
       />
       <MetricCard
@@ -66,6 +67,7 @@ export function CoordinatorSummaryCards() {
             : hint
         }
         icon={Bell}
+        risk={(counts?.critical ?? 0) > 0}
       />
       <MetricCard
         label="Hospitals with coverage gaps"
@@ -77,6 +79,7 @@ export function CoordinatorSummaryCards() {
             : hint
         }
         icon={Hospital}
+        risk={(gaps ?? 0) > 0}
       />
     </section>
   );
