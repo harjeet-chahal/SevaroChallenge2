@@ -64,7 +64,7 @@ function Preview({ action }: { action: SplitShiftAction }) {
   if (!data.allowed) {
     return (
       <div className="space-y-2 rounded-lg border border-critical-border bg-critical-soft/50 p-3">
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-critical">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-critical-ink">
           <TriangleAlert className="size-4" aria-hidden />
           Not allowed — this offer breaks a rule
         </p>
@@ -89,7 +89,7 @@ function Preview({ action }: { action: SplitShiftAction }) {
                 <dt className="text-xs text-muted-foreground">
                   Deficit (next {data.horizon_minutes} min)
                 </dt>
-                <dd className="font-semibold tabular-nums">
+                <dd className="font-semibold font-mono tabular-nums">
                   {p.deficit_physician_minutes_before} → {p.deficit_physician_minutes_after}
                 </dd>
               </div>
@@ -102,7 +102,7 @@ function Preview({ action }: { action: SplitShiftAction }) {
               </div>
               <div className="rounded-md border p-2">
                 <dt className="text-xs text-muted-foreground">Shortfall now</dt>
-                <dd className="font-semibold tabular-nums">
+                <dd className="font-semibold font-mono tabular-nums">
                   {p.deficit_now_before ?? "—"} → {p.deficit_now_after ?? "—"}
                 </dd>
               </div>

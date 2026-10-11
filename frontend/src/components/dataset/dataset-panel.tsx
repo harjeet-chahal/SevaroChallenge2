@@ -79,7 +79,7 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-3 text-sm">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right font-medium tabular-nums">{value}</dd>
+      <dd className="text-right font-medium font-mono tabular-nums">{value}</dd>
     </div>
   );
 }
@@ -375,7 +375,7 @@ export function DatasetPanel({
                   onChange={(e) => setInjectJson(e.target.value)}
                   disabled={disabled || !config?.dataset_loaded}
                 />
-                {jsonError ? <p className="text-xs text-critical">{jsonError}</p> : null}
+                {jsonError ? <p className="text-xs text-critical-ink">{jsonError}</p> : null}
                 <Button type="submit" size="sm" disabled={disabled || !config?.dataset_loaded}>
                   {spinner("json") ?? <Send aria-hidden />}
                   Inject
@@ -397,12 +397,12 @@ export function DatasetPanel({
         ) : null}
         {result?.kind === "issues" ? (
           <div className="rounded-lg border border-critical-border bg-critical-soft/40 p-3">
-            <p className="text-sm font-semibold text-critical">{result.message}</p>
+            <p className="text-sm font-semibold text-critical-ink">{result.message}</p>
             <IssueList issues={result.issues} />
           </div>
         ) : null}
         {result?.kind === "message" ? (
-          <p className={result.ok ? "text-sm text-success" : "text-sm text-critical"}>
+          <p className={result.ok ? "text-sm text-success-ink" : "text-sm text-critical-ink"}>
             {result.message}
           </p>
         ) : null}
@@ -421,7 +421,7 @@ export function DatasetPanel({
   return (
     <section
       aria-labelledby="dataset-panel-heading"
-      className={cn("rounded-xl border bg-card shadow-xs", className)}
+      className={cn("rounded-xl border bg-card", className)}
     >
       <details open={open} onToggle={(e) => setUserOpen(e.currentTarget.open)} className="group">
         <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 rounded-xl p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">

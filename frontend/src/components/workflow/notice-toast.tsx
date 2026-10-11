@@ -29,7 +29,7 @@ export function WorkflowNoticeToast() {
       aria-live="polite"
       className="fixed right-4 bottom-4 z-50 flex w-[min(28rem,calc(100vw-2rem))] items-start gap-2.5 rounded-lg border border-success-border bg-card p-3 text-sm shadow-lg animate-in fade-in-0 slide-in-from-bottom-2"
     >
-      <CheckCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+      <CheckCheck className="mt-0.5 size-4 shrink-0 text-success-ink" aria-hidden />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="font-medium">{notice}</p>
         <Button

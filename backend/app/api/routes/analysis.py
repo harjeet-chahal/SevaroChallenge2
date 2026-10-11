@@ -18,6 +18,7 @@ from app.schemas.metrics import OperationalMetrics
 from app.schemas.optimization import OptimizationInput
 from app.schemas.simulation import SupportedDatetime
 from app.services.analysis import AnalysisService
+from app.services.triage import AlertTriage
 
 router = APIRouter(tags=["analysis"])
 
@@ -44,7 +45,7 @@ def list_alerts(
     hospital_id: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> AlertList:
-    result = AnalysisService(db, settings, cache).analysis(as_of).alerts
+    result = AlertTriage(db).alerts(AnalysisService(db, settings, cache).analysis(as_of).alerts)
     alerts = [
         a
         for a in result.alerts
@@ -59,7 +60,8 @@ def list_alerts(
 def get_alert(
     db: DbSession, settings: AppSettings, cache: Cache, alert_id: str, as_of: AsOf = None
 ) -> Alert:
-    for alert in AnalysisService(db, settings, cache).analysis(as_of).alerts.alerts:
+    analysis = AnalysisService(db, settings, cache).analysis(as_of)
+    for alert in AlertTriage(db).alerts(analysis.alerts).alerts:
         if alert.alert_id == alert_id:
             return alert
     raise NotFoundError(f"Alert '{alert_id}' is not active at this time")
@@ -111,7 +113,8 @@ def demand(db: DbSession, settings: AppSettings, cache: Cache, as_of: AsOf = Non
 def metrics(
     db: DbSession, settings: AppSettings, cache: Cache, as_of: AsOf = None
 ) -> OperationalMetrics:
-    return AnalysisService(db, settings, cache).analysis(as_of).metrics
+    analysis = AnalysisService(db, settings, cache).analysis(as_of)
+    return AlertTriage(db).metrics(analysis.metrics, analysis.alerts)
 
 
 @router.get(

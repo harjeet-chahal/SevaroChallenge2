@@ -33,6 +33,7 @@ from app.core.config import Settings
 from app.core.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.time import utc_now
 from app.db.models import ApprovalRecord, InterventionRecord, OfferRecord, OfferResponseRecord
+from app.engines.alert_detection.handled import same_problem
 from app.engines.analysis import OperationalAnalysis
 from app.engines.coverage_prediction import HospitalCoverageModel, Window
 from app.engines.event_processing import normalize_event
@@ -65,7 +66,7 @@ from app.engines.optimization.split_shift.ranking import cost_estimate, money, p
 from app.engines.timeline import fmt_local
 from app.repositories import EventRepository, ReferenceRepository, SystemRepository
 from app.repositories.workflow import WorkflowRepository
-from app.schemas.alert import Alert, RuleCode
+from app.schemas.alert import Alert
 from app.schemas.audit import AuditEntry, AuditPage
 from app.schemas.common import ActorRef, UserRole
 from app.schemas.event import EventSource, KnownEventType
@@ -161,21 +162,8 @@ def with_default_identity(actor: ActorRef) -> ActorRef:
     return actor.model_copy(update={"actor_id": default}) if default else actor
 
 
-GAP_RULES = {RuleCode.COVERAGE_GAP_NOW.value, RuleCode.COVERAGE_GAP_PROJECTED.value}
-
-
 MAX_SWEEP_PASSES = 5
 """An offer moves at most sent -> accepted -> active -> completed, so a few passes suffice."""
-
-
-def same_problem(a: str, b: str) -> bool:
-    """Alert ids that name the same problem: identical, or a hospital's projected and
-    current coverage-gap alerts (the id changes when the projected gap begins)."""
-    if a == b:
-        return True
-    rule_a, _, entity_a = a.partition(":")
-    rule_b, _, entity_b = b.partition(":")
-    return rule_a in GAP_RULES and rule_b in GAP_RULES and entity_a == entity_b
 
 
 def _iso(moment: datetime) -> str:

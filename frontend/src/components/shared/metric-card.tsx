@@ -2,24 +2,24 @@ import { cn } from "@/lib/utils";
 
 export type MetricTone = "critical" | "warning" | "success" | "neutral";
 
-const TONE_TEXT: Record<MetricTone, string> = {
-  critical: "text-critical",
-  warning: "text-warning",
-  success: "text-success",
-  neutral: "text-foreground",
+const TONE_HINT: Record<MetricTone, string> = {
+  critical: "font-medium text-critical-ink",
+  warning: "font-medium text-warning-ink",
+  success: "text-success-ink",
+  neutral: "text-muted-foreground",
 };
 
-const TONE_RAIL: Record<MetricTone, string> = {
-  critical: "bg-critical",
-  warning: "bg-warning",
-  success: "bg-success",
-  neutral: "bg-transparent",
+const TONE_ICON: Record<MetricTone, string> = {
+  critical: "text-critical-ink",
+  warning: "text-warning-ink",
+  success: "text-success-ink",
+  neutral: "text-faint-foreground",
 };
 
 /**
  * A summary figure. ``value`` is null whenever the backend has not supplied a real
  * number — in which case a dash is shown instead of an invented metric. ``tone`` is set
- * only when the figure needs attention, so colour stays meaningful.
+ * only when the figure needs attention: the hint line then says why, in its ink colour.
  */
 export function MetricCard({
   label,
@@ -47,28 +47,26 @@ export function MetricCard({
 }) {
   const body = (
     <>
-      <span
-        aria-hidden
-        className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full", TONE_RAIL[tone])}
-      />
-      <span className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {Icon ? <Icon className="size-4 text-muted-foreground/70" aria-hidden /> : null}
+      <span className="flex items-start justify-between gap-2">
+        <span className="text-caption text-muted-foreground">{label}</span>
+        {Icon ? <Icon className={cn("size-4 shrink-0", TONE_ICON[tone])} aria-hidden /> : null}
       </span>
       <span
         className={cn(
-          "mt-1 block text-2xl leading-tight font-semibold tabular-nums",
-          value === null ? "text-muted-foreground/60" : TONE_TEXT[tone],
+          "flex items-baseline gap-1.5 font-mono text-[30px] leading-none font-semibold tracking-[-0.02em] tabular-nums",
+          value === null ? "text-faint-foreground" : "text-foreground",
         )}
         aria-label={value === null ? `${label}: no data` : undefined}
       >
         {value ?? "—"}
         {suffix && value !== null ? (
-          <span className="ml-1 text-sm font-medium text-muted-foreground">{suffix}</span>
+          <span className="font-sans text-sm font-medium tracking-normal text-muted-foreground">
+            {suffix}
+          </span>
         ) : null}
       </span>
       {hint ? (
-        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground" title={hint}>
+        <span className={cn("line-clamp-2 text-caption", TONE_HINT[tone])} title={hint}>
           {hint}
         </span>
       ) : null}
@@ -76,7 +74,7 @@ export function MetricCard({
   );
 
   const base = cn(
-    "relative block min-w-0 overflow-hidden rounded-xl border bg-card px-4 py-3 text-left shadow-xs",
+    "flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-card-subtle p-4 text-left",
     className,
   );
 
@@ -86,13 +84,13 @@ export function MetricCard({
       type="button"
       onClick={onClick}
       title={actionLabel}
-      className={cn(
-        base,
-        "transition-colors outline-none hover:border-primary/40 hover:bg-accent/30 focus-visible:ring-3 focus-visible:ring-ring/50",
-      )}
+      className={cn(base, "outline-none hover:border-border-strong hover:bg-card focus-visible:ring-3 focus-visible:ring-ring/50")}
     >
       {body}
       {actionLabel ? <span className="sr-only">. {actionLabel}</span> : null}
     </button>
   );
 }
+
+/** Auto-fit KPI grid: as many 170px+ columns as fit. */
+export const METRIC_GRID = "grid grid-cols-[repeat(auto-fit,minmax(min(100%,150px),1fr))] gap-3";

@@ -48,7 +48,7 @@ export function DataEmptyState({
           description={
             <>
               Can&apos;t reach the API at{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">{apiBaseUrl}</code>. Data
+              <code className="rounded bg-inset px-1 py-0.5 font-mono text-xs">{apiBaseUrl}</code>. Data
               will appear once the connection is restored.
             </>
           }

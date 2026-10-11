@@ -27,7 +27,7 @@ export function ImpactView({
     workflowApi.impact(interventionId, role, signal),
   );
   const data = impact.data;
-  if (impact.error) return <p className="text-xs text-critical">{impact.error}</p>;
+  if (impact.error) return <p className="text-xs text-critical-ink">{impact.error}</p>;
   if (!data) return <p className="text-xs text-muted-foreground">Loading impact…</p>;
   const routing = data.routing;
   return (

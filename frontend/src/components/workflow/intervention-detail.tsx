@@ -52,7 +52,7 @@ export function Block({
 }) {
   return (
     <section className="space-y-1.5">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+      <h3 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
         {Icon ? <Icon className="size-3.5" aria-hidden /> : null}
         {title}
       </h3>
@@ -75,7 +75,7 @@ export function ProblemBlock({ intervention: i }: { intervention: Intervention }
             <span className="font-mono text-xs text-muted-foreground">{p.rule_code}</span>
           ) : null}
         </div>
-        <p className="font-semibold text-navy">{p.title}</p>
+        <p className="font-semibold text-foreground">{p.title}</p>
         <p className="text-muted-foreground">{p.summary}</p>
         <dl className="grid gap-x-4 gap-y-1 pt-1 text-xs sm:grid-cols-2">
           {p.hospital_names.length ? (
@@ -148,10 +148,10 @@ export function ImpactTable({ impact, tz }: { impact: CoverageImpact; tz?: strin
             {impact.hospitals.map((h) => (
               <TableRow key={h.hospital_id}>
                 <TableCell className="font-medium">{h.hospital_name}</TableCell>
-                <TableCell className="text-right tabular-nums">
+                <TableCell className="text-right font-mono tabular-nums">
                   {h.deficit_before} → {h.deficit_after}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
+                <TableCell className="text-right font-mono tabular-nums">
                   {h.shortfall_now_before} → {h.shortfall_now_after}
                 </TableCell>
                 <TableCell className="text-xs">
@@ -177,7 +177,7 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
   return (
     <li className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-semibold text-navy">{item.display_name}</span>
+        <span className="font-semibold text-foreground">{item.display_name}</span>
         <VoluntaryBadge match={item.voluntary} />
         <TagBadge tone={item.role === "primary" ? "info" : "neutral"}>
           {item.role === "primary" ? "Proposed physician" : "Backup"}
@@ -231,7 +231,7 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
         </ul>
       ) : null}
       <div className="flex gap-2 rounded-md border border-success-border bg-success-soft/50 p-2 text-xs">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success-ink" aria-hidden />
         <div className="space-y-0.5">
           <p className="font-semibold text-foreground">
             Routing scope while on the split shift: {item.routing_scope_hospital_ids.join(", ")}

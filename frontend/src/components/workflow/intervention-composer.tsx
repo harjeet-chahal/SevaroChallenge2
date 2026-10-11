@@ -132,7 +132,7 @@ export function InterventionComposer({ className }: { className?: string }) {
 
             <SheetBody className="space-y-4">
               {preview.error ? (
-                <p className="text-sm text-critical" role="alert">
+                <p className="text-sm text-critical-ink" role="alert">
                   {preview.error}
                 </p>
               ) : null}
@@ -142,7 +142,7 @@ export function InterventionComposer({ className }: { className?: string }) {
                   {data.blocking_reasons.map((r) => (
                     <p
                       key={r}
-                      className="rounded-md border border-critical-border bg-critical-soft p-2 text-critical"
+                      className="rounded-md border border-critical-border bg-critical-soft p-2 text-critical-ink"
                     >
                       {r}
                     </p>
@@ -150,7 +150,7 @@ export function InterventionComposer({ className }: { className?: string }) {
                   {data.warnings.map((w) => (
                     <p
                       key={w}
-                      className="rounded-md border border-warning-border bg-warning-soft p-2 text-warning"
+                      className="rounded-md border border-warning-border bg-warning-soft p-2 text-warning-ink"
                     >
                       {w}
                     </p>
@@ -162,7 +162,7 @@ export function InterventionComposer({ className }: { className?: string }) {
 
               {backupChoices.length ? (
                 <fieldset className="space-y-1 rounded-lg border p-3 text-sm">
-                  <legend className="px-1 text-xs font-semibold text-muted-foreground uppercase">
+                  <legend className="px-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                     Backup offers (optional)
                   </legend>
                   <p className="text-xs text-muted-foreground">
@@ -198,7 +198,7 @@ export function InterventionComposer({ className }: { className?: string }) {
               <div className="space-y-1">
                 <label
                   htmlFor="proposal-note"
-                  className="text-xs font-semibold text-muted-foreground uppercase"
+                  className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase"
                 >
                   Coordinator note (internal — never sent to physicians)
                 </label>

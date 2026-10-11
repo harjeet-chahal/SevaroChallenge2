@@ -14,7 +14,7 @@ import { Bullets, Disclosure } from "./shared";
 function Facts({ e, tz }: { e: RankedCandidate; tz?: string | null }) {
   if (!e.offer) return null;
   return (
-    <p className="text-xs text-muted-foreground tabular-nums">
+    <p className="text-xs text-muted-foreground font-mono tabular-nums">
       {formatTime(e.offer.start_at, tz)}–{formatTime(e.offer.end_at, tz)} · online{" "}
       {formatTime(e.offer.online_at, tz)} · removes {e.coverage_physician_minutes} physician-min
       {e.coverage_share_of_best !== null && e.coverage_share_of_best < 1
@@ -48,7 +48,7 @@ function Row({
       <span
         aria-label={`Rank ${e.rank}`}
         className={cn(
-          "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums",
+          "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold font-mono tabular-nums",
           e.rank === 1 ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
         )}
       >
@@ -56,14 +56,14 @@ function Row({
       </span>
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-semibold text-navy">{e.display_name}</span>
+          <span className="font-semibold text-foreground">{e.display_name}</span>
           <VoluntaryBadge match={e.voluntary} />
           <RankMovement movement={e.movement} from={e.rank_without_voluntary} />
           {e.in_plan && !compact ? <TagBadge tone="info">In recommended plan</TagBadge> : null}
         </div>
         <Facts e={e} tz={tz} />
         {moved && compact ? (
-          <p className="text-xs text-success">{e.reasons[0]}</p>
+          <p className="text-xs text-success-ink">{e.reasons[0]}</p>
         ) : null}
         {!compact ? (
           <Disclosure summary={moved ? "Why it moved up" : "Why this rank"}>
@@ -107,7 +107,7 @@ export function RankedPhysicians({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1">
-        <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <h3 className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
           {title ?? `Who to ask first — ${ranking.hospital_names.join(", ")}`}
         </h3>
         <InfoTip label="How physicians are ranked">

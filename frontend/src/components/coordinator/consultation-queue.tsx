@@ -31,7 +31,7 @@ function ConsultDetail({ c, names }: { c: ConsultationState; names: Map<string, 
         <ol className="space-y-0.5">
           {c.stage_history.map((h) => (
             <li key={`${h.event_id}-${h.stage}`} className="flex gap-2">
-              <span className="w-20 shrink-0 tabular-nums text-muted-foreground">
+              <span className="w-20 shrink-0 font-mono tabular-nums text-muted-foreground">
                 {formatTime(h.entered_at, tz)}
               </span>
               <span>
@@ -72,7 +72,7 @@ function ConsultDetail({ c, names }: { c: ConsultationState; names: Map<string, 
         {c.anomalies.length ? (
           <div>
             <p className="mb-1 font-semibold">Anomalies</p>
-            <ul className="space-y-0.5 text-warning">
+            <ul className="space-y-0.5 text-warning-ink">
               {c.anomalies.map((a, i) => (
                 <li key={i}>{a.message}</li>
               ))}
@@ -131,7 +131,7 @@ export function ConsultationQueue({ className }: { className?: string }) {
                 )}
               >
                 {FILTER_LABELS[f]}{" "}
-                <span className="tabular-nums">{all.filter(matches[f]).length}</span>
+                <span className="font-mono tabular-nums">{all.filter(matches[f]).length}</span>
               </button>
             ))}
           </div>
@@ -182,7 +182,7 @@ export function ConsultationQueue({ className }: { className?: string }) {
                         </TableCell>
                         <TableCell>
                           <StageBadge stage={c.stage} />
-                          <span className="block text-xs text-muted-foreground tabular-nums">
+                          <span className="block text-xs text-muted-foreground font-mono tabular-nums">
                             {formatElapsed(c.seconds_in_stage)}
                           </span>
                         </TableCell>

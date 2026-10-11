@@ -48,7 +48,7 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
   return (
     <div className="rounded-lg border bg-card p-3">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
+      <dd className="text-lg font-semibold font-mono tabular-nums">{value}</dd>
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
@@ -65,7 +65,7 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <p className="flex flex-wrap items-center gap-1.5">
-            <span className="font-semibold text-navy">{rec.display_name}</span>
+            <span className="font-semibold text-foreground">{rec.display_name}</span>
             <VoluntaryBadge match={rec.voluntary} />
             <TagBadge tone="info">Recommendation · needs clinical-lead approval</TagBadge>
           </p>
@@ -128,7 +128,7 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
           return (
             <div key={e.hospital_id} className="rounded-md border p-2 text-sm">
               <dt className="font-medium">{e.hospital_name}</dt>
-              <dd className="text-xs text-muted-foreground tabular-nums">
+              <dd className="text-xs text-muted-foreground font-mono tabular-nums">
                 Deficit {e.deficit_physician_minutes_before} → {e.deficit_physician_minutes_after}{" "}
                 physician-min (next {e.horizon_minutes} min)
                 {dash
@@ -140,7 +140,7 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
         })}
       </dl>
       <div className="flex gap-2 rounded-md border border-success-border bg-success-soft/50 p-2 text-xs">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success-ink" aria-hidden />
         <div className="space-y-0.5">
           <p className="font-semibold text-foreground">Split-shift trap protection</p>
           <Bullets items={rec.protection.rationale} className="text-xs" />
@@ -193,8 +193,8 @@ export function TrapSummary({ trap }: { trap: TrapAnalysis }) {
             {rows.map(([label, u, p]) => (
               <TableRow key={label}>
                 <TableCell className="whitespace-normal">{label}</TableCell>
-                <TableCell className="text-right tabular-nums">{u}</TableCell>
-                <TableCell className="text-right tabular-nums">{p}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{u}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{p}</TableCell>
               </TableRow>
             ))}
           </TableBody>

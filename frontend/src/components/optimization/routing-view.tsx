@@ -39,7 +39,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <p className="flex flex-wrap items-center gap-1.5 text-sm">
-            <span className="font-semibold tabular-nums text-muted-foreground">
+            <span className="font-semibold font-mono tabular-nums text-muted-foreground">
               #{rec.priority}
             </span>
             <span className="font-semibold">
@@ -51,7 +51,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
             <TagBadge tone={urgencyTone(rec.urgency_tier)}>{rec.urgency_label}</TagBadge>
             <TagBadge tone="info">{KIND_LABEL[rec.kind]}</TagBadge>
             <ArrowRight className="size-3.5 text-muted-foreground" aria-label="to" />
-            <span className="font-semibold text-navy">{rec.physician_name}</span>
+            <span className="font-semibold text-foreground">{rec.physician_name}</span>
           </p>
           <p className="text-xs text-muted-foreground">
             {rec.waiting_minutes !== null
@@ -99,7 +99,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
                 {rec.cost_breakdown.map((c) => (
                   <li key={c.name} className="flex justify-between gap-3">
                     <span>{c.detail}</span>
-                    <span className="font-medium tabular-nums text-foreground">+{c.value}</span>
+                    <span className="font-medium font-mono tabular-nums text-foreground">+{c.value}</span>
                   </li>
                 ))}
               </ul>
@@ -118,7 +118,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
           </div>
         ) : null}
         {rec.uncertainty.length ? (
-          <p className="text-xs text-warning">Uncertainty: {rec.uncertainty.join("; ")}.</p>
+          <p className="text-xs text-warning-ink">Uncertainty: {rec.uncertainty.join("; ")}.</p>
         ) : null}
       </Disclosure>
     </li>
@@ -207,14 +207,14 @@ export function RoutingView({ data }: { data: DispatchResult }) {
                     </TableCell>
                     <TableCell className="text-xs whitespace-normal">
                       {p.effective_routing_capacity > 0 ? (
-                        <span className="text-success">Yes</span>
+                        <span className="text-success-ink">Yes</span>
                       ) : (
-                        <span className="text-critical">
+                        <span className="text-critical-ink">
                           No — {blocked?.message ?? "no capacity"}
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">
+                    <TableCell className="text-right text-xs font-mono tabular-nums">
                       {p.consults_this_shift}
                       {p.open_consults ? ` (${p.open_consults} open)` : ""}
                     </TableCell>

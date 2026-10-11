@@ -38,7 +38,7 @@ function Waiting({ feature }: { feature: string }) {
       />
     );
   }
-  if (interventions.error) return <p className="text-sm text-critical">{interventions.error}</p>;
+  if (interventions.error) return <p className="text-sm text-critical-ink">{interventions.error}</p>;
   return <p className="text-sm text-muted-foreground">Loading…</p>;
 }
 
@@ -80,7 +80,7 @@ export function PendingApprovals({ className }: { className?: string }) {
                   <InterventionTypeBadge type={i.type} />
                   <span className="font-mono text-xs text-muted-foreground">{i.id}</span>
                 </span>
-                <span className="block font-semibold text-navy">{i.title}</span>
+                <span className="block font-semibold text-foreground">{i.title}</span>
                 <span className="block text-xs text-muted-foreground">
                   {i.problem.title} · proposed {formatTime(i.proposed_at, i.problem.hospital_timezone)}{" "}
                   by {i.proposed_by.actor_id}
@@ -106,7 +106,7 @@ function DecisionPanel({ i }: { i: Intervention }) {
     <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
       {canDecide ? (
         <>
-          <label htmlFor="decision-note" className="text-xs font-semibold text-muted-foreground uppercase">
+          <label htmlFor="decision-note" className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
             Note (optional; recorded in the audit trail)
           </label>
           <Textarea

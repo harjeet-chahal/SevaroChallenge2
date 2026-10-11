@@ -34,7 +34,7 @@ function Field({
     <div className="flex gap-3">
       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0">
-        <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        <dt className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
           {label}
         </dt>
         <dd className="text-base font-medium break-words text-foreground">{children}</dd>
@@ -82,12 +82,12 @@ export function OfferCard({
     <article
       aria-label={`Shift offer ${offer.id}`}
       className={cn(
-        "rounded-2xl border bg-card p-4 shadow-xs sm:p-5",
+        "rounded-2xl border bg-card p-4 sm:p-5",
         offer.status !== "sent" && offer.status !== "accepted" && offer.status !== "active" && "opacity-80",
       )}
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold whitespace-nowrap text-navy">Split-shift offer</h3>
+        <h3 className="text-base font-semibold whitespace-nowrap text-foreground">Split-shift offer</h3>
         <TagBadge tone={TONE[offer.status]}>{offer.status_label}</TagBadge>
       </header>
 
@@ -120,7 +120,7 @@ export function OfferCard({
         <Field icon={Timer} label="Offer expires">
           {formatTime(offer.expires_at, tz)}
           {minutesLeft !== null ? (
-            <span className="block text-sm font-normal text-warning">
+            <span className="block text-sm font-normal text-warning-ink">
               {minutesLeft} simulated min left to reply
             </span>
           ) : null}

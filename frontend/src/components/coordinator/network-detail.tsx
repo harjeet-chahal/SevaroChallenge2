@@ -3,6 +3,7 @@
 import { History, Hospital, Inbox, Sparkles, Users } from "lucide-react";
 
 import { RecommendationPanel } from "@/components/optimization/recommendation-panel";
+import { PILL_TONES } from "@/components/shared/pill";
 import { BareSections } from "@/components/shared/section-card";
 import { useAnalysis } from "@/components/state/analysis-provider";
 import { useOperationalState } from "@/components/state/operational-state-provider";
@@ -22,8 +23,8 @@ function Flag({ children, tone }: { children: React.ReactNode; tone: "warning" |
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 text-[0.6875rem] leading-4 font-semibold whitespace-nowrap",
-        tone === "critical" ? "bg-critical text-white" : "bg-warning text-white",
+        "rounded-full border px-1.5 text-micro leading-4 font-semibold whitespace-nowrap",
+        tone === "critical" ? PILL_TONES.critical : PILL_TONES.warning,
       )}
     >
       {children}
@@ -86,13 +87,13 @@ export function NetworkDetail({ className }: { className?: string }) {
       aria-label="Network detail"
       className={cn("scroll-mt-24", className)}
     >
-      <Card className="w-full min-w-0 gap-0 py-0 shadow-xs">
+      <Card className="w-full min-w-0 gap-0 py-0">
         <Tabs
           value={detailTab}
           onValueChange={(v) => setDetailTab(v as DetailTab)}
           className="gap-0"
         >
-          <div className="overflow-x-auto border-b px-2 pt-2">
+          <div className="overflow-x-auto border-b border-border-subtle px-2.5 pt-2">
             <TabsList variant="line" className="h-10 w-max">
               {tabs.map((t) => (
                 <TabsTrigger key={t.value} value={t.value} className="px-3">

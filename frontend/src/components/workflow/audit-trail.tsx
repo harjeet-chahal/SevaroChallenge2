@@ -21,7 +21,7 @@ function Row({ entry, tz }: { entry: AuditEntry; tz?: string | null }) {
     <li className="grid grid-cols-[6rem_1fr] gap-2 py-1.5 text-xs">
       <time
         dateTime={entry.occurred_at}
-        className="text-muted-foreground tabular-nums"
+        className="text-muted-foreground font-mono tabular-nums"
         title={`Simulation time ${entry.occurred_at}; recorded ${entry.recorded_at} (wall clock)`}
       >
         {formatTime(entry.occurred_at, tz)}
@@ -77,11 +77,11 @@ export function AuditTrail({
   const ordered = interventionId ? [...items].reverse() : items;
   return (
     <div className={cn("space-y-1", className)}>
-      <h4 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+      <h4 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
         <History className="size-3.5" aria-hidden />
         Audit trail{audit.data ? ` (${audit.data.total})` : ""}
       </h4>
-      {audit.error ? <p className="text-xs text-critical">{audit.error}</p> : null}
+      {audit.error ? <p className="text-xs text-critical-ink">{audit.error}</p> : null}
       {!audit.data && !audit.error ? (
         <p className="text-xs text-muted-foreground">Loading…</p>
       ) : items.length === 0 ? (

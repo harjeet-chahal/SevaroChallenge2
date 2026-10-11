@@ -4,14 +4,16 @@ import type { Availability, ConsultStage, VoluntaryMatch, VoluntaryStatus } from
 import { AVAILABILITY_LABELS, STAGE_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
-const chip =
-  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap";
+import { PILL_TONES, Pill, type PillTone } from "./pill";
 
-const AVAILABILITY_STYLES: Record<Availability, string> = {
-  busy: "border-critical-border bg-critical-soft text-critical",
-  available: "border-success-border bg-success-soft text-success",
-  unavailable: "border-warning-border bg-warning-soft text-warning",
-  off_shift: "border-border bg-muted text-muted-foreground",
+const chip =
+  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-label font-medium whitespace-nowrap";
+
+const AVAILABILITY_TONES: Record<Availability, PillTone> = {
+  busy: "critical",
+  available: "success",
+  unavailable: "warning",
+  off_shift: "muted",
 };
 
 /** Availability as decided by the backend's precedence rules. Text, not colour alone. */
@@ -23,36 +25,26 @@ export function AvailabilityBadge({
   className?: string;
 }) {
   return (
-    <span className={cn(chip, AVAILABILITY_STYLES[value], className)}>
-      <span aria-hidden className="size-1.5 rounded-full bg-current" />
+    <Pill tone={AVAILABILITY_TONES[value]} dot className={className}>
       {AVAILABILITY_LABELS[value]}
-    </span>
+    </Pill>
   );
 }
 
 export function StageBadge({ stage, className }: { stage: ConsultStage; className?: string }) {
   const done = stage === "signed_off";
   return (
-    <span
-      className={cn(
-        chip,
-        done
-          ? "border-border bg-muted text-muted-foreground"
-          : "border-info-border bg-info-soft text-info",
-        className,
-      )}
-    >
+    <Pill tone={done ? "muted" : "info"} className={className}>
       {STAGE_LABELS[stage]}
-    </span>
+    </Pill>
   );
 }
 
 export function SyntheticBadge({ className }: { className?: string }) {
   return (
-    <span className={cn(chip, "border-warning-border bg-warning-soft text-warning", className)}>
-      <FlaskConical className="size-3" aria-hidden />
-      SYNTHETIC SAMPLE DATA
-    </span>
+    <Pill tone="warning" icon={FlaskConical} className={cn("font-semibold", className)}>
+      Synthetic sample data
+    </Pill>
   );
 }
 
@@ -65,17 +57,10 @@ export function TagBadge({
   tone?: "neutral" | "info" | "warning" | "critical" | "success";
   title?: string;
 }) {
-  const tones = {
-    neutral: "border-border bg-muted text-muted-foreground",
-    info: "border-info-border bg-info-soft text-info",
-    warning: "border-warning-border bg-warning-soft text-warning",
-    critical: "border-critical-border bg-critical-soft text-critical",
-    success: "border-success-border bg-success-soft text-success",
-  };
   return (
-    <span title={title} className={cn(chip, "font-medium", tones[tone])}>
+    <Pill tone={tone === "neutral" ? "muted" : tone} title={title}>
       {children}
-    </span>
+    </Pill>
   );
 }
 
@@ -107,9 +92,7 @@ export function VoluntaryBadge({
       title={match.message}
       className={cn(
         chip,
-        note === null
-          ? "border-success-border bg-success-soft text-success"
-          : "border-border bg-muted text-muted-foreground",
+        note === null ? PILL_TONES.success : PILL_TONES.muted,
         className,
       )}
     >
@@ -130,7 +113,7 @@ export function RankMovement({ movement, from }: { movement: number; from: numbe
     <span
       className={cn(
         "inline-flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap",
-        up ? "text-success" : "text-muted-foreground",
+        up ? "text-success-ink" : "text-muted-foreground",
       )}
     >
       <Icon className="size-3" aria-hidden />

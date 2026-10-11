@@ -116,14 +116,23 @@ class Alert(ApiModel):
     evidence: list[AlertEvidence] = Field(default_factory=list)
     event_ids: list[EntityId] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    handled_by: EntityId | None = None
+    """The completed intervention that handled this problem. Handled alerts stay in the list
+    (the condition is still in the data) but rank below every open alert."""
 
 
 class AlertList(ApiModel):
     as_of: AwareDatetime
     data_version: int
     total: int
+    """Every active alert, open and handled."""
+    open_total: int
+    """Alerts still needing someone; ``priority`` 1..open_total are these, in order."""
+    handled_total: int = 0
     counts_by_severity: dict[str, int]
+    """Open alerts only, by severity."""
     counts_by_rule: dict[str, int]
+    """Open alerts only, by rule."""
     alerts: list[Alert]
     notes: list[str] = Field(default_factory=list)
     """Rules that could not be evaluated (e.g. unknown consult type), stated plainly."""

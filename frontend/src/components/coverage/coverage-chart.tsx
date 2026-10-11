@@ -95,11 +95,11 @@ function ChartTooltip({
       <dl className="space-y-0.5">
         <div className="flex justify-between gap-4">
           <dt className="text-muted-foreground">Required</dt>
-          <dd className="font-semibold tabular-nums">{row.required ?? "—"}</dd>
+          <dd className="font-semibold font-mono tabular-nums">{row.required ?? "—"}</dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-muted-foreground">Available (confirmed + uncertain)</dt>
-          <dd className="font-semibold tabular-nums">
+          <dd className="font-semibold font-mono tabular-nums">
             {available} ({row.confirmed} + {row.uncertain})
           </dd>
         </div>
@@ -108,15 +108,15 @@ function ChartTooltip({
           <dd
             className={
               row.deficit
-                ? "font-semibold text-critical tabular-nums"
-                : "font-semibold tabular-nums"
+                ? "font-semibold text-critical-ink font-mono tabular-nums"
+                : "font-semibold font-mono tabular-nums"
             }
           >
             {row.deficit ?? "—"}
           </dd>
         </div>
         {row.spike ? (
-          <p className="pt-0.5 text-warning">Demand-spike adjustment active (+1)</p>
+          <p className="pt-0.5 text-warning-ink">Demand-spike adjustment active (+1)</p>
         ) : null}
       </dl>
     </div>

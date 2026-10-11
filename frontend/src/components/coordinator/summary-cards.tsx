@@ -2,7 +2,7 @@
 
 import { Hospital, Inbox, ListChecks, OctagonAlert, Stethoscope, UserX } from "lucide-react";
 
-import { MetricCard } from "@/components/shared/metric-card";
+import { METRIC_GRID, MetricCard } from "@/components/shared/metric-card";
 import { useAnalysis } from "@/components/state/analysis-provider";
 import { useOperationalState } from "@/components/state/operational-state-provider";
 import { useSystemStatus, type DataAvailability } from "@/components/status/system-status-provider";
@@ -45,14 +45,16 @@ export function CoordinatorSummaryCards() {
   const awaitingLead = open.filter((i) => i.status === "pending_approval").length;
 
   return (
-    <section
-      aria-label="Network summary"
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6"
-    >
+    <section aria-label="Network summary" className={METRIC_GRID}>
       <MetricCard
         label="Critical alerts"
         value={counts?.critical ?? null}
-        hint={counts ? `${counts.warning} warning · ${counts.info} info` : hint}
+        hint={
+          counts
+            ? `${counts.warning} warning · ${counts.info} info` +
+              (alerts.data?.handled_total ? ` · ${alerts.data.handled_total} handled` : "")
+            : hint
+        }
         icon={OctagonAlert}
         tone={counts?.critical ? "critical" : "neutral"}
         actionLabel="Show critical alerts"

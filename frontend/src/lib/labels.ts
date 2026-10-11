@@ -126,3 +126,18 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   intervention_closed_dataset_replaced: "Closed: dataset replaced",
   offer_closed_dataset_replaced: "Offer closed: dataset replaced",
 };
+
+/**
+ * The recommendation as a short instruction. "Contact physician" names who, because it is a
+ * call or message the coordinator makes directly; nothing is sent by the app for it.
+ */
+export function recommendationLabel(a: {
+  recommended_action_type: RecommendedAction;
+  physician_name: string | null;
+}): string {
+  if (a.recommended_action_type === "contact_physician" && a.physician_name) {
+    return `Contact ${a.physician_name}`;
+  }
+  return ACTION_LABELS[a.recommended_action_type];
+}
+

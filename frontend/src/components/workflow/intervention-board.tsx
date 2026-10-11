@@ -242,12 +242,12 @@ function Group({
     <div className="space-y-1.5">
       <h3
         className={cn(
-          "flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase",
-          tone === "warning" ? "text-warning" : "text-muted-foreground",
+          "flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase",
+          tone === "warning" ? "text-warning-ink" : "text-muted-foreground",
         )}
       >
         {title}
-        <span className="tabular-nums">({count})</span>
+        <span className="font-mono tabular-nums">({count})</span>
       </h3>
       {children}
     </div>
@@ -267,7 +267,7 @@ function SelectedIntervention({ i }: { i: Intervention }) {
           <InterventionStatusBadge status={i.status} />
           <span className="font-mono text-xs text-muted-foreground">{i.id}</span>
         </div>
-        <p className="text-base font-semibold text-navy">{i.title}</p>
+        <p className="text-base font-semibold text-foreground">{i.title}</p>
       </div>
 
       <InterventionStepper intervention={i} />
@@ -283,8 +283,8 @@ function SelectedIntervention({ i }: { i: Intervention }) {
             <p className="text-sm">
               <span
                 className={cn(
-                  "mr-1.5 text-xs font-semibold tracking-wide uppercase",
-                  mine ? "text-warning" : "text-muted-foreground",
+                  "mr-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase",
+                  mine ? "text-warning-ink" : "text-muted-foreground",
                 )}
               >
                 {mine
@@ -313,7 +313,7 @@ function SelectedIntervention({ i }: { i: Intervention }) {
 
       {i.offers.length ? (
         <div className="space-y-1">
-          <h4 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          <h4 className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
             Offers
           </h4>
           <OfferRows offers={i.offers} tz={tz} actions={(o) => <OfferActions offer={o} />} />
@@ -377,7 +377,7 @@ export function InterventionBoard({ className }: { className?: string }) {
         {!config?.dataset_loaded ? (
           <EmptyState compact icon={ListChecks} title="No dataset loaded" />
         ) : interventions.error ? (
-          <p className="text-sm text-critical">{interventions.error}</p>
+          <p className="text-sm text-critical-ink">{interventions.error}</p>
         ) : !interventions.data ? (
           <p className="text-sm text-muted-foreground">Loading interventions…</p>
         ) : items.length === 0 ? (

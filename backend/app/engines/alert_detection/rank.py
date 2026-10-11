@@ -135,6 +135,7 @@ def rank_alerts(
         as_of=ctx.as_of,
         data_version=data_version,
         total=len(alerts),
+        open_total=len(alerts),
         counts_by_severity={s.value: by_severity.get(s.value, 0) for s in SEVERITY_RANK},
         counts_by_rule=dict(sorted(by_rule.items())),
         alerts=alerts,

@@ -2,14 +2,6 @@
 
 import { createContext, useContext } from "react";
 
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import { InfoTip } from "./info-tip";
@@ -59,7 +51,7 @@ export function SectionCard({
             {action}
           </div>
         ) : info ? (
-          <p className="text-xs text-muted-foreground">{info}</p>
+          <p className="text-caption text-muted-foreground">{info}</p>
         ) : null}
         <div className={contentClassName}>{children}</div>
       </section>
@@ -68,18 +60,24 @@ export function SectionCard({
 
   return (
     <section aria-labelledby={headingId} id={id} className={cn("flex scroll-mt-24", className)}>
-      <Card className="w-full min-w-0 shadow-xs">
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2 font-semibold">
-            {Icon ? <Icon className="size-4 text-primary" aria-hidden /> : null}
-            <h2 id={headingId}>{title}</h2>
-            {info ? <InfoTip label={`About ${title.toLowerCase()}`}>{info}</InfoTip> : null}
-          </CardTitle>
-          {description ? <CardDescription>{description}</CardDescription> : null}
-          {action ? <CardAction>{action}</CardAction> : null}
-        </CardHeader>
-        <CardContent className={cn("flex-1", contentClassName)}>{children}</CardContent>
-      </Card>
+      <div className="flex w-full min-w-0 flex-col rounded-xl bg-card-subtle ring-1 ring-border">
+        <div className="flex items-start gap-3 border-b border-border-subtle px-[18px] py-4">
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex items-center gap-2">
+              {Icon ? <Icon className="size-4 shrink-0 text-primary" aria-hidden /> : null}
+              <h2 id={headingId} className="text-base leading-snug font-semibold">
+                {title}
+              </h2>
+              {info ? <InfoTip label={`About ${title.toLowerCase()}`}>{info}</InfoTip> : null}
+            </div>
+            {description ? (
+              <p className="text-caption text-muted-foreground">{description}</p>
+            ) : null}
+          </div>
+          {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+        </div>
+        <div className={cn("flex-1 px-[18px] py-4", contentClassName)}>{children}</div>
+      </div>
     </section>
   );
 }

@@ -68,7 +68,7 @@ export function PhysicianPortal() {
   return (
     <div className="space-y-6">
       <div className="space-y-1 rounded-lg border bg-card p-3">
-        <label htmlFor="simulated-physician" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
+        <label htmlFor="simulated-physician" className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
           <UserRound className="size-3.5" aria-hidden />
           Signed in as (simulated)
         </label>
@@ -95,7 +95,7 @@ export function PhysicianPortal() {
       </div>
 
       {recipients.error ? (
-        <p className="text-sm text-critical">{recipients.error}</p>
+        <p className="text-sm text-critical-ink">{recipients.error}</p>
       ) : !recipients.data ? (
         <p className="text-sm text-muted-foreground">Loading offers…</p>
       ) : !physicianId ? (

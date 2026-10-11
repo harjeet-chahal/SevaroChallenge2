@@ -9,37 +9,56 @@ function safeDate(iso: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Parts in en-US so every view reads the same regardless of browser locale: 24-hour digits,
+ * "Sep" and US zone abbreviations ("EDT", "CDT") where the zone has one.
+ */
+function zonedFormat(
+  date: Date,
+  timeZone: string | null | undefined,
+  options: Intl.DateTimeFormatOptions,
+): (type: Intl.DateTimeFormatPartTypes) => string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    ...options,
+    hourCycle: "h23",
+    timeZoneName: "short",
+    timeZone: timeZone ?? undefined,
+  }).formatToParts(date);
+  return (type) => parts.find((p) => p.type === type)?.value ?? "";
+}
+
+/** "Sep 10, 18:35 EDT" in the given zone (or the viewer's zone). */
 export function formatDateTime(iso: string, timeZone?: string | null): string {
   const date = safeDate(iso);
   if (!date) return iso;
-  return new Intl.DateTimeFormat(undefined, {
+  const part = zonedFormat(date, timeZone, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    timeZoneName: "short",
-    timeZone: timeZone ?? undefined,
-  }).format(date);
+  });
+  return `${part("month")} ${part("day")}, ${part("hour")}:${part("minute")} ${part("timeZoneName")}`;
 }
 
 /** "17:12 EDT" in the given zone (or the viewer's zone). */
 export function formatTime(iso: string, timeZone?: string | null, seconds = false): string {
   const date = safeDate(iso);
   if (!date) return iso;
-  return new Intl.DateTimeFormat(undefined, {
+  const part = zonedFormat(date, timeZone, {
     hour: "2-digit",
     minute: "2-digit",
     second: seconds ? "2-digit" : undefined,
-    timeZoneName: "short",
-    timeZone: timeZone ?? undefined,
-  }).format(date);
+  });
+  const time = `${part("hour")}:${part("minute")}${seconds ? `:${part("second")}` : ""}`;
+  return `${time} ${part("timeZoneName")}`;
 }
 
 export function formatClockTime(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    hourCycle: "h23",
   }).format(date);
 }
 
@@ -73,4 +92,34 @@ export function formatMoney(amount: number, currency = "USD"): string {
   } catch {
     return `${Math.round(amount)} ${currency}`;
   }
+}
+
+/** The simulation clock as a monitor readout: "18:20", "EDT" and "Tue 17 Mar". */
+export function clockParts(
+  iso: string,
+  timeZone?: string | null,
+): { time: string; zone: string; day: string } | null {
+  const date = safeDate(iso);
+  if (!date) return null;
+  const part = zonedFormat(date, timeZone, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return {
+    time: `${part("hour")}:${part("minute")}`,
+    zone: part("timeZoneName"),
+    day: `${part("weekday")} ${part("day")} ${part("month")}`,
+  };
+}
+
+/** Backend-computed elapsed seconds with seconds shown: "12 min 45 s", "1 h 5 min". */
+export function formatElapsedPrecise(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s >= 3600) return formatDuration(Math.floor(s / 60));
+  if (s < 60) return `${s} s`;
+  const rest = s % 60;
+  return rest ? `${Math.floor(s / 60)} min ${rest} s` : `${Math.floor(s / 60)} min`;
 }

@@ -11,9 +11,9 @@ import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const SEVERITY: Record<IssueSeverity, { icon: typeof Info; tone: string; label: string }> = {
-  error: { icon: OctagonAlert, tone: "text-critical", label: "Error" },
-  warning: { icon: CircleAlert, tone: "text-warning", label: "Warning" },
-  info: { icon: Info, tone: "text-info", label: "Info" },
+  error: { icon: OctagonAlert, tone: "text-critical-ink", label: "Error" },
+  warning: { icon: CircleAlert, tone: "text-warning-ink", label: "Warning" },
+  info: { icon: Info, tone: "text-info-ink", label: "Info" },
 };
 
 function IssueRow({ issue }: { issue: ImportIssue }) {
@@ -66,7 +66,7 @@ export function ImportReportView({ report }: { report: DatasetImportReport }) {
       <p
         className={cn(
           "flex items-center gap-2 text-sm font-semibold",
-          ok ? "text-success" : "text-critical",
+          ok ? "text-success-ink" : "text-critical-ink",
         )}
       >
         {ok ? (
@@ -141,7 +141,7 @@ export function IngestResultView({
   if (rejected && rejected.length > 0) {
     return (
       <div className="rounded-lg border border-critical-border bg-critical-soft/40 p-3 text-sm">
-        <p className="font-semibold text-critical">
+        <p className="font-semibold text-critical-ink">
           {message ?? "Events rejected; nothing was stored."}
         </p>
         <ul className="mt-2 space-y-1">
@@ -163,7 +163,7 @@ export function IngestResultView({
   return (
     <div className="space-y-2">
       <div className="rounded-lg border border-success-border bg-success-soft/40 p-3 text-sm">
-        <p className="font-semibold text-success">
+        <p className="font-semibold text-success-ink">
           {result.accepted} event(s) accepted, {result.duplicates} duplicate(s)
         </p>
         <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
@@ -180,7 +180,7 @@ export function IngestResultView({
       </div>
       {skipped.length ? (
         <div className="rounded-lg border border-critical-border bg-critical-soft/40 p-3 text-sm">
-          <p className="font-semibold text-critical">
+          <p className="font-semibold text-critical-ink">
             {skipped.length} row(s) rejected and not stored; the other rows were loaded.
           </p>
           <ul className="mt-2 space-y-1">

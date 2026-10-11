@@ -66,8 +66,8 @@ function Section({ section }: { section: ComparisonSection }) {
                     {m.better} is better{m.note ? ` · ${m.note}` : ""}
                   </span>
                 </TableCell>
-                <TableCell className="text-right tabular-nums">{value(m.baseline)}</TableCell>
-                <TableCell className="text-right tabular-nums">{value(m.optimized)}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{value(m.baseline)}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{value(m.optimized)}</TableCell>
                 <TableCell>
                   <TagBadge tone={OUTCOME[m.outcome].tone}>{OUTCOME[m.outcome].label}</TagBadge>
                 </TableCell>

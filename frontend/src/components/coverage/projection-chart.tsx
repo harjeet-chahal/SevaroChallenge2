@@ -100,7 +100,7 @@ function ChartTooltip({
       <dt className="text-muted-foreground">{label}</dt>
       <dd
         className={
-          strong ? "font-semibold text-critical tabular-nums" : "font-semibold tabular-nums"
+          strong ? "font-semibold text-critical-ink font-mono tabular-nums" : "font-semibold font-mono tabular-nums"
         }
       >
         {v}

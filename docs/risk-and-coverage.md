@@ -74,6 +74,19 @@ Workload factors (3–6) can never lift an alert above a higher severity or a mo
 safety-critical category. Every alert returns `priority`, the structured `rank` and
 `priority_reasons` in words.
 
+**Handled alerts** (`alert_detection/handled.py`, applied by `services/triage.py` on
+`/api/alerts`, `/api/alerts/{id}` and `/api/metrics`). Alerts come from the live data and
+stay while the condition does: a reassigned consult can still be waiting for its first
+contact, timed from stage entry. An alert is *handled* when every intervention about its
+problem (same alert, the same coverage gap, or the same consult) has finished and at least
+one completed at or after `condition_since`, judged at the alert's `as_of`. Handled alerts
+are still returned with `handled_by` (the intervention id) but rank below every open alert;
+open alerts keep their order and are re-numbered from 1. `counts_by_severity`,
+`counts_by_rule` and the metrics' `alerts_by_*` count the open queue only; `total`,
+`open_total` and `handled_total` give the split. A condition that begins again after the
+completion is a new occurrence and is open again. The analysis cache is unaffected: triage
+runs per request on top of it.
+
 ## 3. Demand spikes
 
 > "A demand spike (trailing 60-minute consults above the hospital's p90 baseline for that

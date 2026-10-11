@@ -25,8 +25,8 @@ function Saving({ c }: { c: CostComparison }) {
   return (
     <span
       className={cn(
-        "font-semibold tabular-nums",
-        c.saving > 0 ? "text-success" : c.saving < 0 ? "text-warning" : "text-muted-foreground",
+        "font-semibold font-mono tabular-nums",
+        c.saving > 0 ? "text-success-ink" : c.saving < 0 ? "text-warning-ink" : "text-muted-foreground",
       )}
     >
       {c.saving > 0 ? `saves ${money}` : c.saving < 0 ? `costs ${money} more` : "same cost"}
@@ -38,7 +38,7 @@ function Headline({ cost, label }: { cost: CostEstimate; label: string }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-lg font-semibold tabular-nums">
+      <span className="text-lg font-semibold font-mono tabular-nums">
         {formatMoney(cost.amount, cost.currency)}
       </span>
       <BasisBadge basis={cost.basis} />
@@ -71,7 +71,7 @@ export function CostSummary({
   if (!cost && !confirmed) return null;
   return (
     <div className="space-y-2 rounded-lg border bg-card p-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
         <BadgeDollarSign className="size-3.5" aria-hidden />
         Cost and savings
       </p>

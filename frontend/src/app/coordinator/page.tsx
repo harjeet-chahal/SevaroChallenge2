@@ -16,7 +16,7 @@ import { InterventionComposer } from "@/components/workflow/intervention-compose
 import { WorkflowNoticeToast } from "@/components/workflow/notice-toast";
 import { WorkflowProvider } from "@/components/workflow/workflow-provider";
 
-export const metadata: Metadata = { title: "Operations Coordinator" };
+export const metadata: Metadata = { title: "Command center" };
 
 /**
  * Reading order follows the coordinator's job: the network at a glance, then what needs
@@ -30,16 +30,16 @@ export default function CoordinatorPage() {
         <OptimizationProvider>
           <WorkflowProvider role="coordinator">
             <CoordinatorViewProvider>
-              <div className="space-y-5">
+              <div className="flex flex-col gap-[22px]">
                 <CoordinatorToolbar />
                 <DatasetGate />
                 <CoordinatorSummaryCards />
                 <div
                   id={SECTION_IDS.triage}
-                  className="grid scroll-mt-24 grid-cols-1 items-start gap-5 lg:grid-cols-12"
+                  className="grid scroll-mt-28 grid-cols-1 items-start gap-[22px] lg:grid-cols-12"
                 >
                   <AlertQueue className="lg:col-span-5" />
-                  <AlertDetails className="lg:sticky lg:top-24 lg:col-span-7" />
+                  <AlertDetails className="lg:sticky lg:top-[96px] lg:col-span-7" />
                 </div>
                 <InterventionBoard />
                 <NetworkDetail />

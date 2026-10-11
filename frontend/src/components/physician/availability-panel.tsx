@@ -36,7 +36,7 @@ const PHASE: Record<
 };
 
 function zoneName(timeZone: string, at: string): string {
-  const part = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: "short" })
+  const part = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
     .formatToParts(new Date(at))
     .find((p) => p.type === "timeZoneName");
   return part?.value ?? timeZone;
@@ -104,7 +104,7 @@ function WindowForm({
       }}
     >
       <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-navy">
+        <legend className="text-sm font-semibold text-foreground">
           {draft.id ? "Update your availability" : "When could you cover an extra shift?"}
         </legend>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Quick choices">
@@ -159,7 +159,7 @@ function WindowForm({
           · times in {zoneName(tz, page.simulation_time)} (your hospital&apos;s time zone)
         </p>
         {short ? (
-          <p className="rounded-md border border-warning-border bg-warning-soft p-2 text-xs text-warning">
+          <p className="rounded-md border border-warning-border bg-warning-soft p-2 text-xs text-warning-ink">
             Shorter than {formatDuration(page.min_useful_window_minutes)}: offers need 2 h of
             coverage after you come online, so this window can&apos;t be matched to an offer.
           </p>
@@ -280,11 +280,11 @@ export function AvailabilityPanel({
   return (
     <section
       aria-labelledby="availability-title"
-      className="space-y-3 rounded-2xl border bg-card p-4 shadow-xs sm:p-5"
+      className="space-y-3 rounded-2xl border bg-card p-4 sm:p-5"
     >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-0.5">
-          <h2 id="availability-title" className="flex items-center gap-1.5 text-lg font-semibold text-navy">
+          <h2 id="availability-title" className="flex items-center gap-1.5 text-lg font-semibold text-foreground">
             <HandHeart className="size-5 text-primary" aria-hidden />
             Extra shift availability
           </h2>
@@ -296,7 +296,7 @@ export function AvailabilityPanel({
       </header>
 
       {resource.error && !page ? (
-        <p className="text-sm text-critical">{resource.error}</p>
+        <p className="text-sm text-critical-ink">{resource.error}</p>
       ) : !page ? (
         <p className="text-sm text-muted-foreground">Loading availability…</p>
       ) : draft ? (
@@ -323,7 +323,7 @@ export function AvailabilityPanel({
         </Button>
       )}
 
-      <p className="flex gap-2 rounded-md border border-info-border bg-info-soft p-2.5 text-xs text-info">
+      <p className="flex gap-2 rounded-md border border-info-border bg-info-soft p-2.5 text-xs text-info-ink">
         <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
         Sharing availability does not assign you a shift. If cover is needed, a coordinator may
         send you an offer — approved by a clinical lead first — that you can accept or decline.

@@ -18,7 +18,7 @@ interface AnalysisContextValue {
   coverage: KeyedResource<CoverageReport>;
   demand: KeyedResource<DemandReport>;
   metrics: KeyedResource<OperationalMetrics>;
-  /** The alert shown in the details panel: the user's pick, else the top-priority alert. */
+  /** The alert shown in the details panel: the user's pick, else the top open alert. */
   selectedAlert: Alert | null;
   selectAlert: (alertId: string) => void;
   selectedHospitalId: string | null;
@@ -34,16 +34,19 @@ const AnalysisContext = createContext<AnalysisContextValue | null>(null);
 export function AnalysisProvider({ children }: { children: React.ReactNode }) {
   const { config } = useSystemStatus();
   const key = config?.dataset_loaded ? `${config.data_version}|${config.simulation_time}` : null;
-  const alerts = useKeyedResource(key, (signal) => analysisApi.alerts(signal));
+  // Alerts rank handled problems last, so they also follow the workflow version.
+  const triageKey = key && `${key}|${config?.workflow_version}`;
+  const alerts = useKeyedResource(triageKey, (signal) => analysisApi.alerts(signal));
   const coverage = useKeyedResource(key, (signal) => analysisApi.coverage(signal));
   const demand = useKeyedResource(key, (signal) => analysisApi.demand(signal));
-  const metrics = useKeyedResource(key, (signal) => analysisApi.metrics(signal));
+  const metrics = useKeyedResource(triageKey, (signal) => analysisApi.metrics(signal));
   const [pickedAlert, selectAlert] = useState<string | null>(null);
   const [pickedHospital, selectHospital] = useState<string | null>(null);
 
   const list = alerts.data?.alerts ?? [];
-  // A picked alert that has since resolved falls back to the current top alert.
-  const selectedAlert = list.find((a) => a.alert_id === pickedAlert) ?? list[0] ?? null;
+  // A picked alert that has since resolved falls back to the top of the open queue.
+  const selectedAlert =
+    list.find((a) => a.alert_id === pickedAlert) ?? list.find((a) => !a.handled_by) ?? null;
 
   const hospitals = coverage.data?.hospitals ?? [];
   const firstAtRisk = [...hospitals]

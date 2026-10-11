@@ -183,7 +183,7 @@ export function EventHistory({ className }: { className?: string }) {
             ) : null}
           </form>
 
-          {events.error ? <p className="text-sm text-critical">{events.error}</p> : null}
+          {events.error ? <p className="text-sm text-critical-ink">{events.error}</p> : null}
           {page ? (
             <div className="-mx-4 max-h-[28rem] overflow-auto">
               <Table className="min-w-[760px]">
@@ -200,7 +200,7 @@ export function EventHistory({ className }: { className?: string }) {
                 <TableBody>
                   {page.items.map((e) => (
                     <TableRow key={e.sequence} className={e.visible ? undefined : "opacity-60"}>
-                      <TableCell className="pl-4 tabular-nums">
+                      <TableCell className="pl-4 font-mono tabular-nums">
                         {formatTime(e.ingested_at, "UTC", true)}
                       </TableCell>
                       <TableCell className="font-mono text-xs" title={e.description ?? undefined}>

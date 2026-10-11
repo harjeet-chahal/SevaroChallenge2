@@ -25,7 +25,7 @@ function Section({
   if (!offers.length && !empty) return null;
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold text-navy">{title}</h2>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       {offers.length ? (
         offers.map((offer) => (
           <OfferCard
@@ -62,7 +62,7 @@ export function OfferList({
   // show them (with live Accept/Decline) under another name.
   const mine = offers.data?.physicianId === physicianId ? offers.data.items : null;
 
-  if (offers.error) return <p className="text-sm text-critical">{offers.error}</p>;
+  if (offers.error) return <p className="text-sm text-critical-ink">{offers.error}</p>;
   if (!mine) return <p className="text-sm text-muted-foreground">Loading offers…</p>;
 
   const open = mine.filter((o) => o.status === "sent");

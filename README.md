@@ -42,8 +42,9 @@ backend/    FastAPI + Pydantic v2 + SQLAlchemy (SQLite)
   tests/
 frontend/   Next.js 16 App Router + TypeScript + Tailwind v4 + shadcn/ui + Lucide + Recharts
   src/app/           /, /coordinator, /clinical-lead, /physician
-  src/components/    ui/ (shadcn), layout/, status/, shared/, coordinator/, coverage/,
-                     optimization/, workflow/, clinical-lead/, physician/
+  src/components/    ui/ (shadcn), layout/ (app shell), landing/, status/, shared/,
+                     coordinator/, coverage/, optimization/, workflow/, clinical-lead/,
+                     physician/
   src/lib/api/       typed API client + types
 docs/
   architecture.md          layers, data model, team ownership split

@@ -1,45 +1,75 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
-import { PageHeader } from "@/components/shared/page-header";
-import { SimulationStatus } from "@/components/status/simulation-status";
-import { DEMO_ROLES } from "@/lib/roles";
+import { LiveReadout } from "@/components/landing/live-readout";
+import { LoopStepper } from "@/components/landing/loop-stepper";
+import { RoleCards } from "@/components/landing/role-cards";
+import { EYEBROW } from "@/components/shared/page-header";
 
 export default function Home() {
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Demo"
-        title="Choose a role"
-        description="Sevaro Pulse turns tele-neurology coverage risk into approved, tracked interventions. Pick a view to explore — there is no login in this demo."
-      />
-      <SimulationStatus />
-      <ul className="grid gap-4 md:grid-cols-3">
-        {DEMO_ROLES.map((role) => {
-          const Icon = role.icon;
-          return (
-            <li key={role.id}>
-              <Link
-                href={role.href}
-                className="group flex h-full flex-col gap-3 rounded-xl border bg-card p-5 shadow-xs transition-colors outline-none hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <span className="flex size-10 items-center justify-center rounded-lg bg-secondary text-primary">
-                  <Icon className="size-5" aria-hidden />
-                </span>
-                <span className="text-base font-semibold text-navy">{role.label}</span>
-                <span className="flex-1 text-sm text-muted-foreground">{role.description}</span>
-                <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
-                  Open view
-                  <ArrowRight
-                    className="size-4 transition-transform group-hover:translate-x-0.5"
-                    aria-hidden
-                  />
-                </span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="flex flex-col gap-[72px] pt-4 min-[900px]:pt-8">
+      <section className="grid items-center gap-10 min-[1200px]:grid-cols-[7fr_5fr]">
+        <div className="space-y-6">
+          <p className={EYEBROW}>Tele-neurology operations command center</p>
+          <h1 className="font-serif text-[clamp(40px,4vw,56px)] leading-[1.04] font-normal tracking-[-0.02em] text-balance text-foreground">
+            Detect coverage risk. Decide with the evidence.{" "}
+            <em className="text-primary">Act before the gap opens.</em>
+          </h1>
+          <p className="max-w-[620px] text-body text-foreground-2">
+            Sevaro Pulse turns tele-neurology coverage risk into approved, tracked interventions.
+            Every figure comes from the backend on the simulation clock. Pick a view to explore;
+            there is no login in this demo.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/coordinator"
+              className="inline-flex h-11 items-center gap-2 rounded-full border border-primary bg-primary px-[18px] text-sm font-semibold text-primary-foreground hover:bg-primary/85"
+            >
+              Open the command center
+              <ArrowRight className="size-4" aria-hidden />
+            </Link>
+            <Link
+              href="/clinical-lead"
+              className="inline-flex h-11 items-center gap-2 rounded-full border border-border-strong px-[18px] text-sm font-semibold text-foreground hover:border-primary"
+            >
+              Review approvals
+            </Link>
+          </div>
+        </div>
+        <LiveReadout />
+      </section>
+
+      <section aria-labelledby="roles-heading" className="space-y-5">
+        <div className="space-y-1.5">
+          <p className={EYEBROW}>Choose a role</p>
+          <h2 id="roles-heading" className="font-serif text-[34px] leading-[1.05] tracking-[-0.01em]">
+            Three people, one rescue.
+          </h2>
+        </div>
+        <RoleCards />
+      </section>
+
+      <section
+        aria-labelledby="loop-heading"
+        className="grid items-start gap-8 min-[1200px]:grid-cols-[5fr_7fr]"
+      >
+        <div className="space-y-4">
+          <p className={EYEBROW}>How it works</p>
+          <h2
+            id="loop-heading"
+            className="font-serif text-[clamp(34px,3.4vw,46px)] leading-[1.05] tracking-[-0.02em]"
+          >
+            A human-approved loop that <em className="text-primary">keeps coverage whole.</em>
+          </h2>
+          <p className="max-w-[520px] text-body text-foreground-2">
+            Nothing reaches an off-shift physician until a clinical lead approves it. All data is
+            synthetic or from the challenge dataset; no real SMS, email or hospital integration
+            exists.
+          </p>
+        </div>
+        <LoopStepper />
+      </section>
     </div>
   );
 }

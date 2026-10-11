@@ -491,12 +491,19 @@ export interface Alert {
   evidence: AlertEvidence[];
   event_ids: string[];
   assumptions: string[];
+  /** The completed intervention that handled this problem; handled alerts rank last. */
+  handled_by: string | null;
 }
 
 export interface AlertList {
   as_of: IsoDateTime;
   data_version: number;
+  /** Every active alert, open and handled. */
   total: number;
+  /** Alerts still needing someone: priorities 1..open_total. */
+  open_total: number;
+  handled_total: number;
+  /** Open alerts only. */
   counts_by_severity: Record<Severity, number>;
   counts_by_rule: Record<string, number>;
   alerts: Alert[];
