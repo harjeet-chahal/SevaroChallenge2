@@ -4,6 +4,9 @@ export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 ).replace(/\/+$/, "");
 
+/** An empty base URL means same-origin: a reverse proxy serves /api next to the UI (Docker). */
+export const API_BASE_LABEL = API_BASE_URL || "this site's /api";
+
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /** The backend answered with a non-success status and a standard error envelope. */
@@ -74,7 +77,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     // Caller-initiated cancellation is not a connectivity problem; let it propagate.
     if (signal?.aborted) throw cause;
     const reason = timeoutSignal.aborted ? `timed out after ${timeoutMs} ms` : "network error";
-    throw new NetworkError(`Could not reach API at ${API_BASE_URL} (${reason})`, { cause });
+    throw new NetworkError(`Could not reach API at ${API_BASE_LABEL} (${reason})`, { cause });
   }
 
   const payload: unknown = await response.json().catch(() => null);

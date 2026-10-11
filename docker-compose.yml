@@ -1,0 +1,66 @@
+# Sevaro Pulse: the whole stack behind one Caddy reverse proxy.
+#
+#   Local:   docker compose up --build            -> http://localhost
+#   AWS:     deploy/aws/deploy.sh (pulls prebuilt images from ECR; see docs/deployment.md)
+#
+# Settings come from a .env file next to this one (see .env.example).
+
+name: sevaro-pulse
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  backend:
+    build: ./backend
+    image: ${IMAGE_PREFIX:-sevaro-pulse}/backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      # Same-origin behind Caddy, so no cross-origin callers by default.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SIMULATION_REFERENCE_TIME: ${SIMULATION_REFERENCE_TIME:-}
+    volumes:
+      - backend-data:/app/data
+    stop_grace_period: 15s
+    logging: *logging
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        NEXT_PUBLIC_STATUS_POLL_MS: ${NEXT_PUBLIC_STATUS_POLL_MS:-15000}
+    image: ${IMAGE_PREFIX:-sevaro-pulse}/frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging: *logging
+
+volumes:
+  # SQLite database: dataset, event log, simulation clock, workflow and audit state.
+  backend-data:
+  # Caddy's TLS certificates and keys.
+  caddy-data:
+  caddy-config:

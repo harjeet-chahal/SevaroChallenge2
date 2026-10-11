@@ -46,6 +46,8 @@ frontend/   Next.js 16 App Router + TypeScript + Tailwind v4 + shadcn/ui + Lucid
                      coordinator/, coverage/, optimization/, workflow/, clinical-lead/,
                      physician/
   src/lib/api/       typed API client + types
+deploy/     Caddyfile (one-origin reverse proxy); aws/ CloudFormation stack + deploy.sh
+docker-compose.yml         backend + frontend + Caddy, for local Docker and the AWS host
 docs/
   architecture.md          layers, data model, team ownership split
   event-processing.md      replay rules, lifecycle transitions, availability precedence, API
@@ -54,6 +56,7 @@ docs/
   dataset-import-plan.md   ZIP/CSV import: mapping, validation, atomic replacement
   workflow.md              Phase 5: state machine, approvals, offers, conflicts, activation
   voluntary-availability.md  "I'm Available": persistence, ranking preference, cost model
+  deployment.md            Docker images, compose stack, AWS (EC2 + ECR via CloudFormation)
 ```
 
 ## Prerequisites
@@ -87,6 +90,21 @@ npm run dev
 
 Open http://localhost:3000. Use the **Demo role** switcher in the header to move
 between Coordinator, Clinical Lead and Physician views. There is no login.
+
+**Or with Docker** (one command, served at http://localhost through Caddy):
+
+```bash
+docker compose up --build
+```
+
+**Deploy to AWS** (one EC2 host, images in ECR; needs AWS CLI v2, Docker and `jq`):
+
+```bash
+deploy/aws/deploy.sh up
+```
+
+See [docs/deployment.md](docs/deployment.md) for HTTPS, access restriction, updates,
+rollbacks, logs, costs and teardown.
 
 ## Checks
 

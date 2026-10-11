@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Sevaro Pulse: one EC2 host running the Docker Compose stack (Caddy, Next.js, FastAPI with
+  SQLite on the root volume), images in ECR, shell and rollouts through SSM. No SSH key.
+
+Parameters:
+  SiteAddress:
+    Type: String
+    Default: ":80"
+    AllowedPattern: ^(:80|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+)$
+    Description: >-
+      ":80" serves plain HTTP on the instance IP. A domain (e.g. pulse.example.com) whose DNS
+      A record points at the PublicIp output gets automatic HTTPS from Let's Encrypt.
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t4g.large, t3.small, t3.medium, t3.large]
+    Description: >-
+      t4g = Graviton (arm64, cheaper, native builds on Apple Silicon); t3 = x86_64.
+      deploy.sh builds images for whichever architecture this resolves to.
+  AllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: ^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$
+    Description: >-
+      Who may reach ports 80/443. The app has no login (roles are simulated), so narrow this
+      (e.g. your office IP/32) unless the demo must be public.
+  VolumeSize:
+    Type: Number
+    Default: 20
+    MinValue: 10
+    Description: Root volume (GiB, gp3, encrypted). Holds Docker images and the SQLite database.
+  VpcId:
+    Type: String
+    Default: ""
+    Description: Optional. Leave empty to use the account's default VPC.
+  SubnetId:
+    Type: String
+    Default: ""
+    Description: Optional public subnet (required if VpcId is set). Empty = default VPC subnet.
+  Arm64AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  X8664AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Mappings:
+  InstanceArch:
+    t4g.small: { Arch: arm64 }
+    t4g.medium: { Arch: arm64 }
+    t4g.large: { Arch: arm64 }
+    t3.small: { Arch: x86_64 }
+    t3.medium: { Arch: x86_64 }
+    t3.large: { Arch: x86_64 }
+
+Conditions:
+  IsArm64: !Equals [!FindInMap [InstanceArch, !Ref InstanceType, Arch], arm64]
+  HasVpc: !Not [!Equals [!Ref VpcId, ""]]
+  HasSubnet: !Not [!Equals [!Ref SubnetId, ""]]
+  HasDomain: !Not [!Equals [!Ref SiteAddress, ":80"]]
+
+Resources:
+  BackendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${AWS::StackName}/backend
+      EmptyOnDelete: true
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "Keep the 10 most recent images",
+            "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10},
+            "action": {"type": "expire"}}]}
+
+  FrontendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${AWS::StackName}/frontend
+      EmptyOnDelete: true
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "Keep the 10 most recent images",
+            "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10},
+            "action": {"type": "expire"}}]}
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Session Manager shell + Run Command (used by deploy.sh), and pulling from ECR.
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sevaro Pulse web (HTTP/HTTPS only; no SSH, use Session Manager)
+      VpcId: !If [HasVpc, !Ref VpcId, !Ref AWS::NoValue]
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: !Ref AllowedCidr }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr }
+        - { IpProtocol: udp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr }
+
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal: { Timeout: PT15M }
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !If [IsArm64, !Ref Arm64AmiId, !Ref X8664AmiId]
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !If [HasSubnet, !Ref SubnetId, !Ref AWS::NoValue]
+      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: !Ref VolumeSize, VolumeType: gp3, Encrypted: true }
+      Tags:
+        - { Key: Name, Value: !Ref AWS::StackName }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          signal() { /opt/aws/bin/cfn-signal -e "$1" --stack ${AWS::StackName} --resource Instance --region ${AWS::Region} || true; }
+          trap 'signal 1' ERR
+
+          dnf install -y docker aws-cfn-bootstrap
+          systemctl enable --now docker
+
+          # Compose v2 plugin (not packaged for Amazon Linux 2023).
+          COMPOSE_VERSION=v2.39.2
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+            "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-$(uname -m)"
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          docker compose version
+
+          # Swap headroom so an OR-Tools solve or an image pull can't OOM a 2 GiB instance.
+          if [ ! -f /swapfile ]; then
+            dd if=/dev/zero of=/swapfile bs=1M count=2048
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          # deploy.sh writes docker-compose.yml, deploy/Caddyfile and .env here.
+          mkdir -p /opt/sevaro-pulse/deploy
+          signal 0
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags:
+        - { Key: Name, Value: !Ref AWS::StackName }
+
+Outputs:
+  Url:
+    Value: !If [HasDomain, !Sub "https://${SiteAddress}", !Sub "http://${ElasticIp.PublicIp}"]
+  SiteAddress:
+    Description: Caddy's site address, written to the host's .env on every release
+    Value: !Ref SiteAddress
+  PublicIp:
+    Value: !GetAtt ElasticIp.PublicIp
+  InstanceId:
+    Value: !Ref Instance
+  Architecture:
+    Value: !FindInMap [InstanceArch, !Ref InstanceType, Arch]
+  ImagePrefix:
+    Description: IMAGE_PREFIX for docker-compose.yml (<prefix>/backend, <prefix>/frontend)
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${AWS::StackName}
+  BackendRepositoryUri:
+    Value: !GetAtt BackendRepository.RepositoryUri
+  FrontendRepositoryUri:
+    Value: !GetAtt FrontendRepository.RepositoryUri

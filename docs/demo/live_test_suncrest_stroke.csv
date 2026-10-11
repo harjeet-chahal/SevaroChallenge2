@@ -1,0 +1,5 @@
+event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,description
+EVT-LIVE-001,2026-03-17T18:19:20-04:00,2026-03-17T18:19:22-04:00,CON-9001,consult_received,,SYN-005,Stroke consult request received
+EVT-LIVE-002,2026-03-17T18:19:45-04:00,2026-03-17T18:19:47-04:00,CON-9001,consult_triaged,,SYN-005,Consult triaged
+EVT-LIVE-003,2026-03-17T18:19:50-04:00,2026-03-17T18:19:53-04:00,CON-9001,routing_attempt_failed,,SYN-005,No available credentialed provider; retry scheduled
+EVT-LIVE-003,2026-03-17T18:19:50-04:00,2026-03-17T18:19:53-04:00,CON-9001,routing_attempt_failed,,SYN-005,No available credentialed provider; retry scheduled

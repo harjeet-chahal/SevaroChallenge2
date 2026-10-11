@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# .env.local points the UI at localhost:8000; the image must use the build args instead.
+.env
+.env.*
+
+npm-debug.log*
+.DS_Store
+Dockerfile
+.dockerignore

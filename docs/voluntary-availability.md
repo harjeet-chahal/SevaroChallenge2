@@ -136,3 +136,9 @@ paid minutes.
   pay data.
 - Withdrawing availability after a proposal does not cancel it: the approval re-check reports
   it and the clinical lead decides.
+
+## 7. Benchmark
+
+[voluntary-availability-benchmark.md](voluntary-availability-benchmark.md) runs the
+official dataset through the whole loop with and without this feature: offers, approvals,
+optimizer work, coverage and cost.

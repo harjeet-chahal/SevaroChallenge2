@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { API_BASE_URL, ApiError, NetworkError } from "@/lib/api/client";
+import { API_BASE_LABEL, API_BASE_URL, ApiError, NetworkError } from "@/lib/api/client";
 import { systemApi } from "@/lib/api/system";
 import type { ConfigResponse, HealthResponse, WorkflowSummary } from "@/lib/api/types";
 
@@ -165,7 +165,7 @@ export function SystemStatusProvider({
 
   const value: SystemStatus = {
     ...snapshot,
-    apiBaseUrl: API_BASE_URL,
+    apiBaseUrl: API_BASE_LABEL,
     availability: deriveAvailability(snapshot),
     live,
     refresh,

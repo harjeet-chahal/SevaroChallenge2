@@ -1,0 +1,32 @@
+# Single entry point: the UI and the API share one origin, so the browser needs no CORS and
+# the frontend image needs no per-environment API URL.
+#
+# SITE_ADDRESS
+#   :80                  plain HTTP on any host name or IP (default)
+#   pulse.example.com    automatic HTTPS from Let's Encrypt. The DNS A record must point at
+#                        this host and ports 80 and 443 must be reachable.
+
+{$SITE_ADDRESS::80} {
+	@backend path /api/* /docs /docs/* /redoc /openapi.json
+	handle @backend {
+		# Compress JSON, but never the Server-Sent Events stream (it must flush per event).
+		@compressible not path /api/live
+		encode @compressible zstd gzip
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

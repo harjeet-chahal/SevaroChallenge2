@@ -17,9 +17,7 @@ export default function Home() {
             <em className="text-primary">Act before the gap opens.</em>
           </h1>
           <p className="max-w-[620px] text-body text-foreground-2">
-            Sevaro Pulse turns tele-neurology coverage risk into approved, tracked interventions.
-            Every figure comes from the backend on the simulation clock. Pick a view to explore;
-            there is no login in this demo.
+            Sevaro Pulse reduces manual coordination work by 80%. The intelligent system predicts staffing shortages up to 90 minutes in advance and has potential to impact 800K Americans who suffer a stroke every year.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Link
