@@ -87,7 +87,7 @@ export function OfferCard({
       )}
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold whitespace-nowrap text-navy">Split-shift offer</h3>
+        <h3 className="text-base font-semibold whitespace-nowrap text-foreground">Split-shift offer</h3>
         <TagBadge tone={TONE[offer.status]}>{offer.status_label}</TagBadge>
       </header>
 

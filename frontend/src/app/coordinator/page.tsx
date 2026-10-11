@@ -8,6 +8,12 @@ import { HospitalCoverage } from "@/components/coordinator/hospital-coverage";
 import { PhysicianActivityPanel } from "@/components/coordinator/physician-activity";
 import { CoordinatorSummaryCards } from "@/components/coordinator/summary-cards";
 import { DatasetPanel } from "@/components/dataset/dataset-panel";
+import {
+  AvailabilityBoard,
+  LastSafeMomentStrip,
+  PriorityOne,
+  ProblemBoard,
+} from "@/components/neurogrid/command";
 import { OptimizationProvider } from "@/components/optimization/optimization-provider";
 import { RecommendationPanel } from "@/components/optimization/recommendation-panel";
 import { PageHeader } from "@/components/shared/page-header";
@@ -18,7 +24,7 @@ import { InterventionBoard } from "@/components/workflow/intervention-board";
 import { InterventionComposer } from "@/components/workflow/intervention-composer";
 import { WorkflowProvider } from "@/components/workflow/workflow-provider";
 
-export const metadata: Metadata = { title: "Operations Coordinator" };
+export const metadata: Metadata = { title: "Command Center" };
 
 export default function CoordinatorPage() {
   return (
@@ -28,13 +34,19 @@ export default function CoordinatorPage() {
           <WorkflowProvider role="coordinator">
           <div className="space-y-6">
             <PageHeader
-              eyebrow="Operations Coordinator"
-              title="Network operations"
-              description="See what needs attention now and what is coming next, propose an intervention, and follow it through approval, offer and activation."
+              eyebrow="Operations Coordinator · Command Center"
+              title="What is happening, what is most urgent, and when to act"
+              description="Detect → diagnose → forecast → decide → simulate → approve → act → verify. Every figure comes from the backend engines on the simulation clock."
             />
             <SimulationStatus />
             <DatasetPanel />
+            <PriorityOne />
             <CoordinatorSummaryCards />
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              <ProblemBoard className="xl:col-span-2" />
+              <AvailabilityBoard />
+            </div>
+            <LastSafeMomentStrip />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <AlertQueue className="lg:col-span-2" />
               <AlertDetails />

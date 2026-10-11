@@ -20,8 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection: Any, _: Any) -> None:
+    """Foreign keys on every connection; WAL journal (readers never block the single
+    writer) and a busy timeout so a short write lock waits instead of failing."""
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+    except Exception:  # pragma: no cover - e.g. :memory: databases keep their own mode
+        pass
     cursor.close()
 
 

@@ -236,7 +236,7 @@ export function InterventionBoard({ className }: { className?: string }) {
                     <InterventionTypeBadge type={selected.type} />
                     <InterventionStatusBadge status={selected.status} />
                   </div>
-                  <p className="font-semibold text-navy">{selected.title}</p>
+                  <p className="font-semibold text-foreground">{selected.title}</p>
                   {NEXT_STEP[selected.status] ? (
                     <p className="text-sm text-muted-foreground">{NEXT_STEP[selected.status]}</p>
                   ) : null}

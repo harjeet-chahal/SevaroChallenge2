@@ -95,7 +95,7 @@ export function AlertQueue({ className }: { className?: string }) {
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <SeverityBadge severity={a.severity} />
-                            <span className="text-sm font-semibold text-navy">{a.title}</span>
+                            <span className="text-sm font-semibold text-foreground">{a.title}</span>
                           </div>
                           <p className="line-clamp-2 text-sm text-muted-foreground">{a.summary}</p>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

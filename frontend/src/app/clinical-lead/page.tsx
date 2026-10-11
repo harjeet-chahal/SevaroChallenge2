@@ -5,6 +5,7 @@ import {
   InterventionDetail,
   PendingApprovals,
 } from "@/components/clinical-lead/sections";
+import { FreshnessLockBanner } from "@/components/neurogrid/contracts";
 import { PageHeader } from "@/components/shared/page-header";
 import { SimulationStatus } from "@/components/status/simulation-status";
 import { WorkflowProvider } from "@/components/workflow/workflow-provider";
@@ -22,6 +23,7 @@ export default function ClinicalLeadPage() {
       <SimulationStatus />
       <WorkflowProvider role="clinical_lead">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <FreshnessLockBanner className="lg:col-span-5" />
           <PendingApprovals className="lg:col-span-2" />
           <InterventionDetail className="lg:col-span-3" />
           <ApprovalHistory className="lg:col-span-5" />

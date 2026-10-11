@@ -9,9 +9,9 @@ export default function Home() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Demo"
-        title="Choose a role"
-        description="Sevaro Pulse turns tele-neurology coverage risk into approved, tracked interventions. Pick a view to explore — there is no login in this demo."
+        eyebrow="NEUROGRID · demo personas"
+        title="Detect the disruption. Find the last safe opportunity. Engineer the rescue. Verify the recovery."
+        description="A self-healing teleneurology operations network on synthetic data. Pick a role — there is no login in this demo; roles are simulated and enforced server-side."
       />
       <SimulationStatus />
       <ul className="grid gap-4 md:grid-cols-3">
@@ -26,7 +26,7 @@ export default function Home() {
                 <span className="flex size-10 items-center justify-center rounded-lg bg-secondary text-primary">
                   <Icon className="size-5" aria-hidden />
                 </span>
-                <span className="text-base font-semibold text-navy">{role.label}</span>
+                <span className="text-base font-semibold text-foreground">{role.label}</span>
                 <span className="flex-1 text-sm text-muted-foreground">{role.description}</span>
                 <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
                   Open view

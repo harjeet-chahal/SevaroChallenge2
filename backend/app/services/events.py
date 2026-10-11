@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import status
@@ -60,6 +60,30 @@ class _Rejected:
     raw: dict
     source_file: str | None = None
     source_row: int | None = None
+
+
+MAX_CLOCK_ADVANCE = timedelta(hours=12)
+"""Monotonic clock policy: an import may move "now" forward to its latest event, but never
+backward and never by more than this (a mistyped date cannot jump the scenario by days)."""
+
+
+def advance_to_latest(now_sim: datetime, events: list[NormalizedEvent]) -> tuple[datetime, str]:
+    """Monotonic clock policy for imports: now = max(now, latest event_time / ingested_at).
+
+    A late event (event_time in the past) changes past state without moving time backward.
+    """
+    latest = max((max(e.event_time, e.ingested_at) for e in events), default=now_sim)
+    if latest <= now_sim:
+        return now_sim, (
+            "Clock unchanged: every imported event is at or before the current simulation "
+            "time (late events update past state; time never moves backward)."
+        )
+    if latest - now_sim > MAX_CLOCK_ADVANCE:
+        return now_sim, (
+            f"Clock unchanged: the latest event is {latest.isoformat()}, more than "
+            f"{MAX_CLOCK_ADVANCE} ahead; advance the clock explicitly if intended."
+        )
+    return latest, f"Clock advanced to the latest imported event ({latest.isoformat()})."
 
 
 class EventService:
@@ -166,7 +190,9 @@ class EventService:
             accepted.append((index, result.event, result.warnings))
         return self._store(accepted, rejected, now_sim, total=len(inputs))
 
-    def ingest_csv(self, filename: str, data: bytes) -> EventIngestResult:
+    def ingest_csv(
+        self, filename: str, data: bytes, *, advance_clock: bool = False
+    ) -> EventIngestResult:
         now_sim = self.simulation.require_current_time()
         mapping = load_mapping(self.settings.resolved_dataset_mapping_file)
         log = IssueLog(mapping.max_reported_issues)
@@ -195,7 +221,9 @@ class EventService:
             )
             for r in parsed.rejected
         ]
-        return self._store(accepted, rejected, now_sim, total=parsed.rows_read)
+        return self._store(
+            accepted, rejected, now_sim, total=parsed.rows_read, advance_clock=advance_clock
+        )
 
     def _store(
         self,
@@ -204,6 +232,7 @@ class EventService:
         now_sim: datetime,
         *,
         total: int,
+        advance_clock: bool = False,
     ) -> EventIngestResult:
         if rejected:
             for r in rejected:
@@ -274,14 +303,25 @@ class EventService:
         state = SystemRepository(self.session).get_or_create_simulation_state(utc_now())
         state.data_version = (state.data_version or 0) + 1
         state.updated_at = utc_now()
+        new_time, note = (
+            advance_to_latest(now_sim, [e for _, e, _ in accepted])
+            if advance_clock
+            else (now_sim, None)
+        )
+        if new_time != now_sim:
+            state.current_time = new_time
+            for (_, e, _), o in zip(accepted, outcomes, strict=True):
+                o.visible_now = e.ingested_at <= new_time and e.event_time <= new_time
         self.session.commit()
         return EventIngestResult(
             received=total,
             accepted=len(accepted) - duplicates,
             duplicates=duplicates,
             rejected=0,
-            simulation_time=now_sim,
+            simulation_time=new_time,
             outcomes=outcomes,
+            clock_before=now_sim if advance_clock else None,
+            clock_note=note,
         )
 
     def rejections(self, limit: int, offset: int):

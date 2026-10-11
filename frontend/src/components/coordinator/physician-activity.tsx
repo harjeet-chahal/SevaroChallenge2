@@ -34,7 +34,7 @@ function PhysicianRow({ p }: { p: PhysicianState }) {
       <details className="group">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-navy">{p.display_name}</p>
+            <p className="truncate text-sm font-semibold text-foreground">{p.display_name}</p>
             <p className="text-sm">{ACTIVITY_LABELS[p.activity]}</p>
             <p className="text-xs text-muted-foreground">
               {p.open_consult_ids.length} open · {p.consults_this_shift} consults ·{" "}

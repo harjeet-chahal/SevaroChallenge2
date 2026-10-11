@@ -162,6 +162,9 @@ class EventIngestResult(ApiModel):
     rejected: int = Field(ge=0)
     simulation_time: AwareDatetime | None
     outcomes: list[EventIngestOutcome]
+    clock_before: AwareDatetime | None = None
+    """Set when the import was asked to advance the clock (monotonic clock policy)."""
+    clock_note: str | None = None
 
 
 class EventRejection(ApiModel):

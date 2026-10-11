@@ -6,6 +6,7 @@ from app.api.routes import (
     analysis,
     datasets,
     events,
+    intelligence,
     interventions,
     live,
     offers,
@@ -26,3 +27,4 @@ api_router.include_router(optimization.router)
 api_router.include_router(interventions.router)
 api_router.include_router(offers.router)
 api_router.include_router(live.router)
+api_router.include_router(intelligence.router)

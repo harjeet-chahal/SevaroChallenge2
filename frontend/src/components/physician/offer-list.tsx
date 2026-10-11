@@ -47,7 +47,7 @@ function Section({
   if (!offers.length && !empty) return null;
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold text-navy">{title}</h2>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       {offers.length ? (
         offers.map((offer) => (
           <OfferCard

@@ -62,7 +62,7 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <p className="flex flex-wrap items-center gap-1.5">
-            <span className="font-semibold text-navy">{rec.display_name}</span>
+            <span className="font-semibold text-foreground">{rec.display_name}</span>
             <TagBadge tone="info">Recommendation · needs clinical-lead approval</TagBadge>
           </p>
           <p className="text-sm">

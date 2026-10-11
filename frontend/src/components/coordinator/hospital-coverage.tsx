@@ -113,7 +113,7 @@ export function HospitalCoverage({ className }: { className?: string }) {
                     active && "border-primary ring-1 ring-primary/40",
                   )}
                 >
-                  <span className="block truncate text-sm font-semibold text-navy">
+                  <span className="block truncate text-sm font-semibold text-foreground">
                     {h.hospital_name}
                   </span>
                   <span className="mt-1 flex flex-wrap gap-1">

@@ -1,19 +1,37 @@
-# Sevaro Pulse: Tele-Neurology Operations Command Center
+# NEUROGRID — the self-healing teleneurology operations network
 
-A hackathon build for the Rutgers Health Hack (Sevaro Challenge 2). It **detects**
-coverage risk across a tele-neurology network, helps operations **decide** on an
-intervention, and **acts** on it through clinical-lead approval and simulated offers to
-off-shift physicians.
+**Detect the disruption. Find the last safe opportunity. Engineer the rescue. Verify the recovery.**
 
-> **Status: Phase 5 (human-in-the-loop intervention workflow).** On top of detection
+A Rutgers Health Hack build (Sevaro Challenge 2). NEUROGRID extends the existing Sevaro
+Pulse command center into one connected control loop:
+**detect → diagnose → forecast → decide → simulate → approve → act → verify → reassess**.
+
+| Layer | What it does | Where |
+| --- | --- | --- |
+| Detect | Deterministic event replay (dedupe, late events, repeat calls); consult stages and SLAs; inferred physician availability; surge, coverage and routing alerts | existing Phases 2–3 |
+| Diagnose | Ranked problems (alert fingerprints, lexicographic tiers); **Coverage Genome** root causes; **Network Fragility Scanner** (NetworkX) | `engines/intelligence`, `/coordinator`, `/network` |
+| Forecast | **Coverage Time Machine** (exact 90-min frames, shift lanes, seeded Poisson demand band); **Last Safe Moment**; coverage debt; shift handoff | `/time-machine` |
+| Decide / simulate | **Rescue Impact Simulator** (isolated copies, do-nothing comparator, lexicographic objective); **Rescue Scarcity Index**; **Physician Load Guardian** | `/simulator`, `/network` |
+| Approve / act | Rescue contracts on the existing validated workflow: clinical-lead approval with re-validation (**Decision Freshness Lock**), simulated offers, expiry, conflicting acceptances | `/contracts`, `/clinical-lead`, `/physician` |
+| Verify | Recovery verification against current state, recorded in the audit log | `/contracts` |
+| Prove it | **Chaos Lab**: 16 fault scenarios on throw-away branch databases with real assertions; measured evaluation against monitoring-only and reactive baselines | `/chaos` |
+| Ingest | Unseen event CSVs: validate and preview on a branch, then apply without restart (optional monotonic clock advance) | `/import` |
+
+Start with [docs/DEMO.md](docs/DEMO.md) (the judging script with real numbers),
+[docs/NEUROGRID_SPEC.md](docs/NEUROGRID_SPEC.md) (requirement → code → status),
+[docs/RULES.md](docs/RULES.md), [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md),
+[docs/TEST_REPORT.md](docs/TEST_REPORT.md) and [docs/TRADEOFFS.md](docs/TRADEOFFS.md).
+NEUROGRID is decision support on synthetic data. It does not diagnose, does not control
+Sevaro's production routing, and never bypasses credentialing, rest, working-hour or
+approval rules.
+
+<details><summary>Earlier phase notes (Sevaro Pulse)</summary>
+
+> **Phase 5 (human-in-the-loop intervention workflow).** On top of detection
 > (Phase 3) and the OR-Tools optimizers (Phase 4), the full Detect → Decide → Act loop
-> runs end to end. A coordinator proposes a split shift, a reassignment or an
-> escalation. A clinical lead approves or rejects; approval re-validates eligibility,
-> offer limits and the remaining need. Approved offers are sent (simulated). The
-> off-shift physician accepts or declines on a phone-sized view, and the system tracks
-> activation and recalculates coverage, alerts and routing. Conflicting acceptances,
-> expiry, idempotent replies and trap protection are handled server-side, and every step
-> is audited. See [docs/workflow.md](docs/workflow.md).
+> runs end to end. See [docs/workflow.md](docs/workflow.md).
+
+</details>
 
 All data is synthetic. No patient information is stored or displayed, and no real SMS,
 email or hospital integration exists.
@@ -33,15 +51,18 @@ backend/    FastAPI + Pydantic v2 + SQLAlchemy (SQLite)
     engines/         pure logic: event_processing, physician_state, consultation_state,
                      replay, rules, demand, coverage_prediction, alert_detection,
                      analysis, optimization_input, optimization (Phase 4),
-                     interventions (Phase 5: state machines, policy, overlay, privacy)
+                     interventions (Phase 5: state machines, policy, overlay, privacy),
+                     intelligence (NEUROGRID: availability classes, time machine, last safe
+                     moment, fragility, genome, scarcity, simulator, debt, handoff, problems)
     services/        … + workflow.py (Phase 5 orchestration, transactions, audit)
   data/raw/          drop dataset CSVs / ZIP here (git-ignored)
   sample_data/       SYNTHETIC SAMPLE DATA fixtures: synthetic_dev, synthetic_surge,
                      synthetic_staffing, synthetic_workflow (Phase 5 demo)
   scripts/           fixture generators (deterministic)
   tests/
-frontend/   Next.js 16 App Router + TypeScript + Tailwind v4 + shadcn/ui + Lucide + Recharts
-  src/app/           /, /coordinator, /clinical-lead, /physician
+frontend/   Next.js 16 App Router + TypeScript + Tailwind v4 + shadcn/ui + Lucide + Recharts + React Flow
+  src/app/           /, /coordinator, /time-machine, /network, /simulator, /contracts,
+                     /chaos, /import, /clinical-lead, /physician
   src/components/    ui/ (shadcn), layout/, status/, shared/, coordinator/, coverage/,
                      optimization/, workflow/, clinical-lead/, physician/
   src/lib/api/       typed API client + types
@@ -56,7 +77,7 @@ docs/
 
 ## Prerequisites
 
-- Python **3.11+** (developed on 3.12)
+- Python **3.11+** (developed on 3.12; NEUROGRID verified on 3.14)
 - Node.js **20.9+** and npm
 
 ## Run it
@@ -90,7 +111,27 @@ between Coordinator, Clinical Lead and Physician views. There is no login.
 
 ```bash
 cd backend && .venv/bin/pytest && .venv/bin/ruff check . && .venv/bin/ruff format --check .
-cd frontend && npx tsc --noEmit && npm run lint && npm run build
+cd frontend && npx tsc --noEmit && npm run lint && npm test && npm run build
+cd frontend && npx playwright install chromium && npx playwright test   # e2e; starts its own backend on a fresh DB
+```
+
+`make install | backend | frontend | demo-data | test | e2e` wrap the same commands.
+`docker-compose.yml` is provided but was not exercised on the build machine.
+
+## NEUROGRID API
+
+```bash
+curl localhost:8000/api/intelligence/problems          # grouped, tiered problems
+curl localhost:8000/api/intelligence/last-safe-moment  # rescue deadlines
+curl localhost:8000/api/intelligence/time-machine      # projected frames + lanes + demand band
+curl localhost:8000/api/intelligence/fragility         # graph, single points, allocation
+curl localhost:8000/api/intelligence/genome            # root causes
+curl localhost:8000/api/intelligence/scarcity          # off-shift backup scarcity
+curl "localhost:8000/api/intelligence/simulate?hospital_id=SYN-008"
+curl -X POST localhost:8000/api/chaos/run/surge_single -H 'X-Demo-Role: coordinator'
+curl -X POST "localhost:8000/api/events/csv/preview?advance_clock=true" -F file=@judge.csv
+curl -X POST "localhost:8000/api/events/csv?advance_clock=true" -F file=@judge.csv
+curl -X POST localhost:8000/api/rescue-contracts/INT-0001/verify -H 'X-Demo-Role: coordinator'
 ```
 
 ## Demo
@@ -195,6 +236,7 @@ Every error uses one envelope: `{"error": {"code", "message", "details"}}`.
 | `DATASET_MAPPING_FILE`      | *(empty)*                             | JSON override for column aliases etc.   |
 | `RISK_RULES_FILE`           | *(empty)*                             | JSON override for thresholds/policies   |
 | `OPTIMIZATION_POLICY_FILE`  | *(empty)*                             | JSON override for optimizer weights, limits, trap policy |
+| `INTELLIGENCE_POLICY_FILE`  | *(empty)*                             | JSON override for NEUROGRID lead times, weights, horizons ([ASSUMPTIONS](docs/ASSUMPTIONS.md)) |
 | `MAX_UPLOAD_BYTES` / `MAX_UNCOMPRESSED_BYTES` / `MAX_ARCHIVE_ENTRIES` | 50 MB / 200 MB / 200 | Upload safety limits |
 
 | Variable (frontend)          | Default                 |

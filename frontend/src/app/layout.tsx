@@ -12,14 +12,14 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: {
-    default: "Sevaro Pulse",
-    template: "%s · Sevaro Pulse",
+    default: "NEUROGRID",
+    template: "%s · NEUROGRID",
   },
-  description: "Tele-Neurology Operations Command Center — detect, decide, act.",
+  description: "Detect the disruption. Find the last safe opportunity. Engineer the rescue. Verify the recovery.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#13294b",
+  themeColor: "#0b1428",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

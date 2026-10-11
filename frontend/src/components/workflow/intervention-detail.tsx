@@ -67,7 +67,7 @@ export function ProblemBlock({ intervention: i }: { intervention: Intervention }
             <span className="font-mono text-xs text-muted-foreground">{p.rule_code}</span>
           ) : null}
         </div>
-        <p className="font-semibold text-navy">{p.title}</p>
+        <p className="font-semibold text-foreground">{p.title}</p>
         <p className="text-muted-foreground">{p.summary}</p>
         <dl className="grid gap-x-4 gap-y-1 pt-1 text-xs sm:grid-cols-2">
           {p.hospital_names.length ? (
@@ -169,7 +169,7 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
   return (
     <li className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-semibold text-navy">{item.display_name}</span>
+        <span className="font-semibold text-foreground">{item.display_name}</span>
         <TagBadge tone={item.role === "primary" ? "info" : "neutral"}>
           {item.role === "primary" ? "Proposed physician" : "Backup"}
         </TagBadge>

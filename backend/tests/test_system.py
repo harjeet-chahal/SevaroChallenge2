@@ -28,7 +28,7 @@ def test_config_reports_no_dataset_and_no_simulation_time(client: TestClient) ->
 
     assert response.status_code == 200
     body = response.json()
-    assert body["app_name"] == "Sevaro Pulse"
+    assert body["app_name"] == "NEUROGRID"
     assert body["dataset_loaded"] is False
     assert body["simulation_time"] is None
     assert body["simulation_time_source"] == "unset"

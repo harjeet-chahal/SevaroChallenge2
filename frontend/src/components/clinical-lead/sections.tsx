@@ -80,7 +80,7 @@ export function PendingApprovals({ className }: { className?: string }) {
                   <InterventionTypeBadge type={i.type} />
                   <span className="font-mono text-xs text-muted-foreground">{i.id}</span>
                 </span>
-                <span className="block font-semibold text-navy">{i.title}</span>
+                <span className="block font-semibold text-foreground">{i.title}</span>
                 <span className="block text-xs text-muted-foreground">
                   {i.problem.title} · proposed {formatTime(i.proposed_at, i.problem.hospital_timezone)}{" "}
                   by {i.proposed_by.actor_id}

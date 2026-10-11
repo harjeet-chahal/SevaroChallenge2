@@ -74,12 +74,23 @@ def inject_events(
     summary="Append event rows from a CSV in the dataset's event_stream format",
 )
 async def inject_events_csv(
-    db: DbSession, settings: AppSettings, file: Annotated[UploadFile, File()]
+    db: DbSession,
+    settings: AppSettings,
+    file: Annotated[UploadFile, File()],
+    advance_clock: Annotated[
+        bool,
+        Query(
+            description="Monotonic clock policy: move 'now' forward to the latest imported "
+            "event (never backward, at most 12 h). Off by default."
+        ),
+    ] = False,
 ) -> EventIngestResult:
     data = await file.read(settings.max_upload_bytes + 1)
     if len(data) > settings.max_upload_bytes:
         raise AppError("Upload too large", code="upload_too_large", status_code=413)
-    return EventService(db, settings).ingest_csv(file.filename or "events.csv", data)
+    return EventService(db, settings).ingest_csv(
+        file.filename or "events.csv", data, advance_clock=advance_clock
+    )
 
 
 @router.get("/rejections", response_model=RejectionPage)

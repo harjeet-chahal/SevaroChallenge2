@@ -32,3 +32,4 @@ backend/data/raw/*
 # --- Node / Next.js (frontend/.gitignore has the rest)
 node_modules/
 .next/
+backend/data/e2e.db*

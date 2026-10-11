@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "Sevaro Pulse"
+    app_name: str = "NEUROGRID"
     app_version: str = __version__
     app_env: Literal["development", "test", "production"] = "development"
 
@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     risk_rules_file: Path | None = None
     optimization_policy_file: Path | None = None
     """JSON overrides for Phase 4 optimizer policy (weights, limits, trap policy)."""
+    intelligence_policy_file: Path | None = None
+    """JSON overrides for the NEUROGRID intelligence policy (lead times, weights...)."""
 
     # Upload safety limits for dataset imports.
     max_upload_bytes: int = 50 * 1024 * 1024
@@ -57,6 +59,7 @@ class Settings(BaseSettings):
         "dataset_mapping_file",
         "risk_rules_file",
         "optimization_policy_file",
+        "intelligence_policy_file",
         mode="before",
     )
     @classmethod
@@ -100,6 +103,10 @@ class Settings(BaseSettings):
     @property
     def resolved_optimization_policy_file(self) -> Path | None:
         return _resolve(self.optimization_policy_file) if self.optimization_policy_file else None
+
+    @property
+    def resolved_intelligence_policy_file(self) -> Path | None:
+        return _resolve(self.intelligence_policy_file) if self.intelligence_policy_file else None
 
 
 def _resolve(path: Path) -> Path:

@@ -70,7 +70,7 @@ export function AlertDetails({ className }: { className?: string }) {
               <SeverityBadge severity={a.severity} />
               <TagBadge tone="neutral">Priority {a.priority}</TagBadge>
             </div>
-            <p className="font-semibold text-navy">{a.title}</p>
+            <p className="font-semibold text-foreground">{a.title}</p>
             <p className="text-muted-foreground">{a.summary}</p>
           </div>
 

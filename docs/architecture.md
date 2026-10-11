@@ -100,3 +100,26 @@ endpoints in [optimization.md §5](optimization.md#5-api-read-only).
 
 Phase 5 endpoints (interventions, offers, audit, live updates) are in
 [workflow.md §11](workflow.md#11-api).
+
+## NEUROGRID layer
+
+```
+engines/intelligence/      pure: OperationalAnalysis + Phase 4 internals in → schemas.intelligence out
+  availability.py          NEUROGRID classes over the R1–R10 precedence decision
+  common.py                isolated what-ifs on HospitalCoverageModel windows (drop/add/extend)
+  time_machine.py          exact frames, shift lanes, seeded Poisson demand band (NumPy)
+  rescue_planning.py       Last Safe Moment, Rescue Scarcity Index
+  network.py               NetworkX bipartite graph, single-point failures, Hopcroft-Karp allocation
+  genome.py                root-cause factors and strategic suggestions
+  operations.py            coverage debt, shift handoff, problem fingerprints and tiers
+  simulator.py             Rescue Impact Simulator, Physician Load Guardian
+services/intelligence.py   caching + workflow context; services/rescue_contracts.py (phases, verification)
+services/branch.py         throw-away SQLite copy (online backup API) for chaos runs and import previews
+services/chaos.py          16 scenarios through the real ingest/workflow paths, with assertions
+api/routes/intelligence.py /api/intelligence/*, /api/rescue-contracts/*, /api/chaos/*, /api/events/csv/preview
+```
+
+Every what-if is a `dataclasses.replace` of the coverage models, re-evaluated with the
+same exact piecewise engine as the dashboard. The live analysis is never mutated. SQLite
+runs in WAL mode with a 5 s busy timeout. Frontend views key every fetch on (data version,
+workflow version, simulation time), so the existing `/api/live` SSE stream refreshes them.

@@ -2398,7 +2398,7 @@ class WorkflowService:
                 "current_dispatch_proposals_to_physician": routed,
                 "baseline": "Least-loaded routing per the brief's rules 3–4 (unrestricted, raw "
                 "zero count) vs the protected policy, on modeled arrivals (see trap).",
-                "disclaimer": "Simulated within Sevaro Pulse; this does not change Sevaro's "
+                "disclaimer": "Simulated within NEUROGRID; this does not change Sevaro's "
                 "production routing.",
             }
             notes.append(

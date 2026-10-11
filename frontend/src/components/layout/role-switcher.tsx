@@ -55,7 +55,7 @@ export function RoleSwitcher({ className }: { className?: string }) {
               <span>{role.shortLabel}</span>
               {role.id === "clinical_lead" && pending > 0 ? (
                 <span
-                  className="rounded-full bg-warning px-1.5 text-[0.7rem] leading-4 font-semibold text-white"
+                  className="rounded-full bg-warning px-1.5 text-[0.7rem] leading-4 font-semibold text-navy"
                   aria-label={`${pending} pending approval${pending > 1 ? "s" : ""}`}
                 >
                   {pending}

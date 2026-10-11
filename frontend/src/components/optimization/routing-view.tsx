@@ -48,7 +48,7 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
             <TagBadge tone={urgencyTone(rec.urgency_tier)}>{rec.urgency_label}</TagBadge>
             <TagBadge tone="info">{KIND_LABEL[rec.kind]}</TagBadge>
             <ArrowRight className="size-3.5 text-muted-foreground" aria-label="to" />
-            <span className="font-semibold text-navy">{rec.physician_name}</span>
+            <span className="font-semibold text-foreground">{rec.physician_name}</span>
           </p>
           <p className="text-xs text-muted-foreground">
             {rec.waiting_minutes !== null
