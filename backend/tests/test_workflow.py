@@ -886,3 +886,67 @@ def test_workflow_fixture_generator_is_reproducible(tmp_path):
 def test_split_shift_quota_follows_the_peak_deficit(wf):
     created = propose_ok(wf)
     assert created["required_physicians"] == 1
+
+
+def test_declared_extra_availability_persists_and_restricts_candidates(wf):
+    payload = {"enabled": True, "windows": []}
+    assert wf.put("/api/offers/extra-availability", headers=COORD, json=payload).status_code == 403
+    saved = wf.put("/api/offers/extra-availability", headers=doctor(VALE), json=payload)
+    assert saved.status_code == 200
+    assert wf.get("/api/offers/extra-availability", headers=doctor(VALE)).json() == payload
+    result = wf.get("/api/optimization/split-shifts").json()
+    assert "outside declared" in json.dumps(result)
+    assert (
+        wf.put(
+            "/api/offers/extra-availability",
+            headers=doctor(VALE),
+            json={
+                "enabled": True,
+                "windows": [{"start": "2030-09-10T22:35:00Z", "end": "2030-09-11T02:35:00Z"}],
+            },
+        ).status_code
+        == 200
+    )
+    created = propose_ok(wf)
+    assert any(p["physician_id"] == VALE for p in created["offer_plan"])
+
+
+def test_declared_availability_rejects_invalid_times(wf):
+    for window in [
+        {"start": "2030-09-10T22:00:00", "end": "2030-09-11T02:00:00"},
+        {"start": "2030-09-11T02:00:00Z", "end": "2030-09-10T22:00:00Z"},
+    ]:
+        assert (
+            wf.put(
+                "/api/offers/extra-availability",
+                headers=doctor(VALE),
+                json={"enabled": True, "windows": [window]},
+            ).status_code
+            == 422
+        )
+
+
+def test_extra_availability_clips_offer_and_revalidates_approval(wf):
+    assert (
+        wf.put(
+            "/api/offers/extra-availability",
+            headers=doctor(VALE),
+            json={
+                "enabled": True,
+                "windows": [{"start": "2030-09-10T22:35:00Z", "end": "2030-09-11T01:05:00Z"}],
+            },
+        ).status_code
+        == 200
+    )
+    created = propose_ok(wf)
+    plan = next(p for p in created["offer_plan"] if p["physician_id"] == VALE)
+    assert plan["duration_minutes"] <= 150
+    assert (
+        wf.put(
+            "/api/offers/extra-availability",
+            headers=doctor(VALE),
+            json={"enabled": True, "windows": []},
+        ).status_code
+        == 200
+    )
+    assert decide(wf, created["id"]).status_code == 409

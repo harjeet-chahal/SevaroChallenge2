@@ -8,9 +8,12 @@ clinical leads see every offer with its full history.
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import Field
 
 from app.api.deps import AppSettings, Cache, DbSession, DemoActor, OptCache
-from app.schemas.common import UserRole
+from app.core.errors import NotFoundError
+from app.db.models import PhysicianRecord
+from app.schemas.common import ApiModel, UserRole
 from app.schemas.intervention import CancelRequest
 from app.schemas.offer import (
     ExpireResult,
@@ -21,7 +24,9 @@ from app.schemas.offer import (
     PhysicianOfferView,
     ShiftOffer,
 )
+from app.schemas.physician import ShiftWindow
 from app.services.workflow import WorkflowService, require_role
+from app.services.workflow_records import bump_data_version, write_audit
 
 router = APIRouter(prefix="/offers", tags=["offers"])
 
@@ -112,3 +117,50 @@ def withdraw(
 ) -> ShiftOffer:
     """Withdraw a sent offer; for an accepted/active one this cancels the split shift."""
     return _svc(db, settings, cache, opt_cache).withdraw_offer(offer_id, body, actor)
+
+
+class ExtraAvailability(ApiModel):
+    enabled: bool = False
+    windows: list[ShiftWindow] = Field(default_factory=list, max_length=20)
+
+
+@router.get("/extra-availability", response_model=ExtraAvailability)
+def extra_availability(actor: DemoActor, db: DbSession) -> ExtraAvailability:
+    require_role(actor, UserRole.PHYSICIAN, action="view own extra-shift availability")
+    row = db.get(PhysicianRecord, actor.actor_id)
+    if row is None:
+        raise NotFoundError("Physician not found")
+    return ExtraAvailability.model_validate((row.attributes or {}).get("extra_availability", {}))
+
+
+@router.put("/extra-availability", response_model=ExtraAvailability)
+def save_extra_availability(
+    body: ExtraAvailability,
+    actor: DemoActor,
+    db: DbSession,
+    settings: AppSettings,
+    cache: Cache,
+    opt_cache: OptCache,
+) -> ExtraAvailability:
+    require_role(actor, UserRole.PHYSICIAN, action="update own extra-shift availability")
+    svc = _svc(db, settings, cache, opt_cache)
+    with svc._write():
+        row = db.get(PhysicianRecord, actor.actor_id)
+        if row is None:
+            raise NotFoundError("Physician not found")
+        row.attributes = {
+            **(row.attributes or {}),
+            "extra_availability": body.model_dump(mode="json"),
+        }
+        bump_data_version(db)
+        write_audit(
+            db,
+            at=svc._now(),
+            actor=actor,
+            action="extra_availability_updated",
+            summary=f"{row.display_name} updated extra-shift availability.",
+            entity_type="physician",
+            entity_id=row.id,
+            details=body.model_dump(mode="json"),
+        )
+    return body

@@ -203,6 +203,24 @@ def offer_checks(
             )
         )
 
+    availability = profile.attributes.get("extra_availability", {}) if profile else {}
+    if availability.get("enabled"):
+        from app.schemas.physician import ShiftWindow
+
+        windows = [ShiftWindow.model_validate(w) for w in availability.get("windows", [])]
+        fits = any(w.start <= start and end <= w.end for w in windows)
+        add(
+            "extra_availability",
+            "Declared extra-shift availability",
+            fits,
+            "within declared window" if fits else "outside declared windows",
+            "entire offer inside a declared window",
+            "Offer fits the physician's declared availability"
+            if fits
+            else "Offer is outside the physician's declared extra-shift availability",
+            source="implementation_choice",
+        )
+
     opt_in = profile.split_shift_opt_in if profile else None
     add(
         "opt_in",
@@ -378,6 +396,22 @@ def evaluate_candidate(
     earliest = ctx.as_of
     if last_end is not None:
         earliest = max(earliest, _ceil_minute(last_end + timedelta(hours=st.rest_hours)))
+    availability = profile.attributes.get("extra_availability", {}) if profile else {}
+    if availability.get("enabled"):
+        from app.schemas.physician import ShiftWindow
+
+        windows = sorted(
+            [ShiftWindow.model_validate(w) for w in availability.get("windows", [])],
+            key=lambda w: w.start,
+        )
+        viable = [
+            w
+            for w in windows
+            if w.end
+            >= max(earliest, w.start) + timedelta(minutes=st.min_offer_minutes + online_minutes)
+        ]
+        if viable:
+            earliest = max(earliest, viable[0].start)
     in_window = earliest + timedelta(minutes=online_minutes) < ctx.plan_end
     eval_start = earliest if in_window else ctx.as_of
     max_by_hours = (
@@ -530,6 +564,17 @@ def generate_options(candidates: list[Candidate], ctx: PlanningContext) -> list[
             continue
         online = timedelta(minutes=cand.online_minutes)
         starts = {cand.earliest_start}
+        availability = cand.profile.attributes.get("extra_availability", {}) if cand.profile else {}
+        windows = []
+        if availability.get("enabled"):
+            from app.schemas.physician import ShiftWindow
+
+            windows = [ShiftWindow.model_validate(w) for w in availability.get("windows", [])]
+            starts.update(
+                max(cand.earliest_start, w.start)
+                for w in windows
+                if w.end > cand.earliest_start and w.start < ctx.plan_end
+            )
         for hid in cand.scope:
             for a, _, deficit in ctx.models[hid].deficit_profile():
                 s = a - online
@@ -537,6 +582,14 @@ def generate_options(candidates: list[Candidate], ctx: PlanningContext) -> list[
                     starts.add(s)
         for start in sorted(starts)[: max(1, st.max_start_options)]:
             lengths = set(st.duration_options_minutes)
+            for window in windows:
+                if window.start <= start < window.end:
+                    lengths.add(
+                        min(
+                            max(st.duration_options_minutes),
+                            int((window.end - start).total_seconds() // 60),
+                        )
+                    )
             if cand.latest_end is not None:
                 until_next = int((cand.latest_end - start).total_seconds() // 60)
                 if until_next <= max(st.duration_options_minutes):

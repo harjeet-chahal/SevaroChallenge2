@@ -11,6 +11,8 @@ import { offersApi } from "@/lib/api/endpoints";
 import type { PhysicianOfferView } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/format";
 
+import { ExtraAvailability } from "./extra-availability";
+
 import { OfferCard } from "./offer-card";
 
 const STORAGE_KEY = "sevaro-pulse:simulated-physician";
@@ -127,6 +129,8 @@ export function OfferList() {
           {config?.simulation_time ? formatDateTime(config.simulation_time) : "—"}
         </p>
       </div>
+
+      {physicianId && <ExtraAvailability key={physicianId} physicianId={physicianId} />}
 
       {offers.error ? <p className="text-sm text-critical-ink">{offers.error}</p> : null}
       {!offers.data && !offers.error ? (
