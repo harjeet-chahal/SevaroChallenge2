@@ -78,6 +78,11 @@ export function OptimizationProvider({ children }: { children: React.ReactNode }
   );
 }
 
+/** The optimizer results when rendered inside the coordinator view, else null. */
+export function useOptionalOptimization(): OptimizationContextValue | null {
+  return useContext(OptimizationContext);
+}
+
 export function useOptimization(): OptimizationContextValue {
   const context = useContext(OptimizationContext);
   if (!context) throw new Error("useOptimization must be used inside <OptimizationProvider>");

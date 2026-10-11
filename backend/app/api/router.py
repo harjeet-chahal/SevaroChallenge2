@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     analysis,
+    availability,
     datasets,
     events,
     interventions,
@@ -25,4 +26,5 @@ api_router.include_router(analysis.router)
 api_router.include_router(optimization.router)
 api_router.include_router(interventions.router)
 api_router.include_router(offers.router)
+api_router.include_router(availability.router)
 api_router.include_router(live.router)

@@ -12,6 +12,8 @@ import {
   User,
 } from "lucide-react";
 
+import { useOptionalOptimization } from "@/components/optimization/optimization-provider";
+import { RankedPhysicians } from "@/components/optimization/ranked-physicians";
 import { Disclosure } from "@/components/optimization/shared";
 import { InfoTip } from "@/components/shared/info-tip";
 import { PendingActionButton } from "@/components/shared/pending-action-button";
@@ -139,6 +141,28 @@ function viewIntervention(select: ((id: string) => void) | undefined, id: string
   scrollToSection(SECTION_IDS.interventions);
 }
 
+/**
+ * For a coverage gap: the backend's ranked physicians for this hospital, top three, so the
+ * coordinator sees who would be asked (and any volunteer who moved up) before proposing.
+ */
+function WhoToAsk({ a }: { a: Alert }) {
+  const optimization = useOptionalOptimization();
+  const ranking = optimization?.staffing.data?.rankings.find(
+    (r) => r.hospital_ids.length === 1 && r.hospital_ids[0] === a.hospital_id,
+  );
+  if (!a.hospital_id || !a.rule_code.startsWith("COVERAGE_GAP") || !ranking) return null;
+  if (!ranking.entries.some((e) => e.rank !== null)) return null;
+  return (
+    <RankedPhysicians
+      ranking={ranking}
+      tz={a.hospital_timezone}
+      compact
+      limit={3}
+      title="Who to ask first"
+    />
+  );
+}
+
 /** The one thing to do next: the recommendation and its button, or what is already under way. */
 function NextStep({ a, linked }: { a: Alert; linked: Intervention[] }) {
   const workflow = useOptionalWorkflow();
@@ -261,6 +285,8 @@ function NextStep({ a, linked }: { a: Alert; linked: Intervention[] }) {
           <p className="text-xs text-muted-foreground">{a.recommended_action_reason}</p>
         </div>
       )}
+
+      {handled ? null : <WhoToAsk a={a} />}
 
       {buttons.length ? (
         <div className="space-y-1.5">

@@ -15,15 +15,20 @@ from app.engines.timeline import fmt_local
 
 
 def offer_reason(
-    hospital_names: list[str], shortfall_at: datetime | None, tz: str, surge: bool
+    hospital_names: list[str],
+    shortfall_at: datetime | None,
+    tz: str,
+    surge: bool,
+    volunteered: bool = False,
 ) -> str:
     where = ", ".join(hospital_names) if hospital_names else "your credentialed hospitals"
     when = f" from {fmt_local(shortfall_at, tz)}" if shortfall_at is not None else ""
     cause = " Demand there is above its normal level." if surge else ""
+    shared = " It falls within the availability you shared." if volunteered else ""
     return (
         f"Short-term coverage gap forecast at {where}{when}: fewer credentialed "
         f"neurologists available than required.{cause} You are opted in, credentialed there "
-        "and rested."
+        f"and rested.{shared}"
     )[:500]
 
 

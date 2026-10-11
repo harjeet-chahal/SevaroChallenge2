@@ -33,7 +33,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from app.engines.analysis import OperationalAnalysis
-from app.engines.coverage_prediction import HospitalCoverageModel, build_coverage_models
+from app.engines.coverage_prediction import (
+    HospitalCoverageModel,
+    Window,
+    build_coverage_models,
+    hypothetical_window,
+)
 from app.engines.optimization.config import OptimizationConfig
 from app.engines.optimization.ordering import natural_key
 from app.engines.timeline import fmt_local, fmt_local_datetime
@@ -51,6 +56,17 @@ class Decline:
     hospital_ids: tuple[str, ...]
     declined_at: datetime
     until: datetime
+
+
+@dataclass(frozen=True)
+class AvailabilityWindow:
+    """A window an off-shift physician volunteered for an extra shift (off-shift portal).
+    A preference only: it never changes eligibility and never assigns a shift."""
+
+    availability_id: str
+    physician_id: str
+    start: datetime
+    end: datetime
 
 
 @dataclass
@@ -74,6 +90,20 @@ class PlanningContext:
     7 days), from the Phase 5 workflow tables (see app.services.workflow)."""
     declines: dict[str, list[Decline]] = field(default_factory=dict)
     """physician_id -> declined offers in the current dataset (Phase 5 offer log)."""
+    availability: dict[str, list[AvailabilityWindow]] = field(default_factory=dict)
+    """physician_id -> active voluntary availability windows (off-shift portal)."""
+
+    def window_for(
+        self, physician_id: str, start: datetime, end: datetime
+    ) -> AvailabilityWindow | None:
+        """The volunteered window that contains the whole offer [start, end), if any (and
+        voluntary availability is enabled)."""
+        if not self.cfg.voluntary.enabled:
+            return None
+        for w in sorted(self.availability.get(physician_id, []), key=lambda w: w.start):
+            if w.start <= start and end <= w.end:
+                return w
+        return None
 
     def declined_hospitals(self, physician_id: str) -> dict[str, Decline]:
         """Hospitals this physician declined an offer for that is still running at ``as_of``
@@ -653,4 +683,80 @@ def generate_options(candidates: list[Candidate], ctx: PlanningContext) -> list[
                         hospitals=cand.scope,
                     )
                 )
+    if ctx.cfg.voluntary.enabled and ctx.cfg.voluntary.fit_offers_to_window:
+        options.extend(window_options(candidates, ctx, options))
     return options
+
+
+def window_options(
+    candidates: list[Candidate], ctx: PlanningContext, existing: list[Option]
+) -> list[Option]:
+    """Offers that start and end inside a physician's volunteered window, so a volunteer can
+    be asked for exactly the time they offered. Only eligible candidates get them, and every
+    option is re-checked against every rule like any other."""
+    st = ctx.cfg.staffing
+    seen = {(o.physician_id, o.start, o.minutes) for o in existing}
+    longest = max(st.duration_options_minutes)
+    added: list[Option] = []
+    for cand in candidates:
+        windows = ctx.availability.get(cand.physician_id)
+        if not windows or not cand.eligibility.eligible or cand.earliest_start is None:
+            continue
+        online = timedelta(minutes=cand.online_minutes)
+        lead = online + timedelta(minutes=st.login_buffer_minutes)
+        shortest = st.min_offer_minutes + cand.online_minutes
+        for w in sorted(windows, key=lambda w: w.start):
+            first = max(w.start, cand.earliest_start)
+            if first >= w.end or first + online >= ctx.plan_end:
+                continue
+            starts = {_ceil_minute(first)}
+            for hid in cand.scope:
+                for a, _, deficit in ctx.models[hid].deficit_profile():
+                    s = _ceil_minute(a - lead)
+                    if deficit > 0 and first < s < w.end and s + online < ctx.plan_end:
+                        starts.add(s)
+            for start in sorted(starts)[: max(1, st.max_start_options)]:
+                room = int((w.end - start).total_seconds() // 60)
+                lengths = {m for m in st.duration_options_minutes if m <= room}
+                lengths |= {min(room, longest), shortest}
+                for minutes in sorted(lengths):
+                    if minutes < st.min_offer_minutes or minutes > room:
+                        continue
+                    key = (cand.physician_id, start, minutes)
+                    if key in seen:
+                        continue
+                    checks = offer_checks(
+                        cand.state,
+                        cand.profile,
+                        start,
+                        minutes,
+                        cand.scope,
+                        ctx,
+                        cand.online_minutes,
+                        cand.eligibility.online_time_assumed,
+                    )
+                    if not all(c.passed for c in checks):
+                        continue
+                    seen.add(key)
+                    added.append(
+                        Option(
+                            index=len(existing) + len(added),
+                            physician_id=cand.physician_id,
+                            name=cand.state.display_name,
+                            start=start,
+                            minutes=minutes,
+                            online_at=start + online,
+                            end=start + timedelta(minutes=minutes),
+                            hospitals=cand.scope,
+                        )
+                    )
+    return added
+
+
+PROPOSED_REASON = "proposed split shift — projected if accepted, not confirmed"
+
+
+def proposed_window(option: Option) -> Window:
+    return hypothetical_window(
+        option.physician_id, option.name, option.online_at, option.end, PROPOSED_REASON
+    )

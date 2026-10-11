@@ -1,35 +1,13 @@
 "use client";
 
-import { Inbox, UserRound } from "lucide-react";
-import { useState } from "react";
+import { Inbox } from "lucide-react";
 
-import { DataEmptyState } from "@/components/shared/data-empty-state";
 import { EmptyState } from "@/components/shared/empty-state";
-import { useSystemStatus } from "@/components/status/system-status-provider";
 import { useKeyedResource } from "@/hooks/use-keyed-resource";
 import { offersApi } from "@/lib/api/endpoints";
 import type { PhysicianOfferView } from "@/lib/api/types";
-import { formatDateTime } from "@/lib/format";
 
 import { OfferCard } from "./offer-card";
-
-const STORAGE_KEY = "sevaro-pulse:simulated-physician";
-
-function readStored(): string | null {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function store(value: string) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, value);
-  } catch {
-    // Storage blocked (private mode): the choice simply is not remembered.
-  }
-}
 
 function Section({
   title,
@@ -68,108 +46,50 @@ function Section({
  * Offers for the simulated, signed-in physician. Only offers a clinical lead approved and
  * someone sent exist at all; the backend returns only this physician's own offers.
  */
-export function OfferList() {
-  const { availability, config } = useSystemStatus();
-  // Server render shows the loading/empty state, so reading storage lazily is safe here.
-  const [picked, setPicked] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : readStored(),
-  );
-
-  const loaded = Boolean(config?.dataset_loaded);
-  const versions = config ? `${config.workflow_version}|${config.data_version}|${config.simulation_time}` : "";
-  const recipients = useKeyedResource(loaded ? `recipients|${versions}` : null, (signal) =>
-    offersApi.recipients(signal),
-  );
-  const people = recipients.data ?? [];
-  const fallback =
-    people.find((p) => p.open_offers > 0)?.physician_id ?? people[0]?.physician_id ?? null;
-  const known = people.find((p) => p.physician_id === picked)?.physician_id ?? null;
-  // The first default sticks: answering an offer must not silently switch the simulated user.
-  // A remembered id that is not in this list (e.g. picked under another dataset) is replaced
-  // the same way, once, and the replacement is remembered.
-  if (known === null && fallback !== null) {
-    if (picked !== null) store(fallback);
-    setPicked(fallback);
-  }
-  const physicianId = known ?? fallback;
-  const offers = useKeyedResource(physicianId ? `${physicianId}|${versions}` : null, (signal) =>
-    offersApi.mine(physicianId!, signal).then((items) => ({ physicianId: physicianId!, items })),
+export function OfferList({
+  physicianId,
+  versions,
+  simulationTime,
+}: {
+  physicianId: string;
+  versions: string;
+  simulationTime: string | null;
+}) {
+  const offers = useKeyedResource(`${physicianId}|${versions}`, (signal) =>
+    offersApi.mine(physicianId, signal).then((items) => ({ physicianId, items })),
   );
   // The previous doctor's offers stay in the resource while the new doctor's load; never
   // show them (with live Accept/Decline) under another name.
   const mine = offers.data?.physicianId === physicianId ? offers.data.items : null;
 
-  if (availability === "checking" || availability === "offline" || availability === "degraded" || !loaded) {
-    return <DataEmptyState feature="offers" whenNoDataset="No dataset is loaded, so there are no offers." />;
-  }
+  if (offers.error) return <p className="text-sm text-critical">{offers.error}</p>;
+  if (!mine) return <p className="text-sm text-muted-foreground">Loading offers…</p>;
 
-  const all = mine ?? [];
-  const open = all.filter((o) => o.status === "sent");
-  const committed = all.filter((o) => o.status === "accepted" || o.status === "active");
-  const past = all.filter((o) => !open.includes(o) && !committed.includes(o));
+  const open = mine.filter((o) => o.status === "sent");
+  const committed = mine.filter((o) => o.status === "accepted" || o.status === "active");
+  const past = mine.filter((o) => !open.includes(o) && !committed.includes(o));
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1 rounded-lg border bg-card p-3">
-        <label htmlFor="simulated-physician" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
-          <UserRound className="size-3.5" aria-hidden />
-          Signed in as (simulated)
-        </label>
-        <select
-          id="simulated-physician"
-          className="h-10 w-full rounded-md border bg-background px-2 text-base"
-          value={physicianId ?? ""}
-          onChange={(e) => {
-            setPicked(e.target.value);
-            store(e.target.value);
-          }}
-        >
-          {people.map((p) => (
-            <option key={p.physician_id} value={p.physician_id}>
-              {p.display_name}
-              {p.open_offers ? ` — ${p.open_offers} new offer${p.open_offers > 1 ? "s" : ""}` : ""}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          Demo stand-in for a login (not real authentication). Simulated time now:{" "}
-          {config?.simulation_time ? formatDateTime(config.simulation_time) : "—"}
-        </p>
-      </div>
-
-      {recipients.error ? (
-        <p className="text-sm text-critical">{recipients.error}</p>
-      ) : !recipients.data ? (
-        <p className="text-sm text-muted-foreground">Loading offers…</p>
-      ) : !physicianId ? (
-        <EmptyState compact icon={Inbox} title="No off-shift physicians in this dataset" />
-      ) : offers.error ? (
-        <p className="text-sm text-critical">{offers.error}</p>
-      ) : !mine ? (
-        <p className="text-sm text-muted-foreground">Loading offers…</p>
-      ) : (
-        <>
-          <Section
-            title="Needs your reply"
-            offers={open}
-            physicianId={physicianId}
-            simulationTime={config?.simulation_time ?? null}
-            empty="No offers waiting for a reply. Offers appear only after a clinical lead approves them."
-          />
-          <Section
-            title="Your accepted shifts"
-            offers={committed}
-            physicianId={physicianId}
-            simulationTime={config?.simulation_time ?? null}
-          />
-          <Section
-            title="Past offers"
-            offers={past}
-            physicianId={physicianId}
-            simulationTime={config?.simulation_time ?? null}
-          />
-        </>
-      )}
+      <Section
+        title="Needs your reply"
+        offers={open}
+        physicianId={physicianId}
+        simulationTime={simulationTime}
+        empty="No offers waiting for a reply. Offers appear only after a clinical lead approves them."
+      />
+      <Section
+        title="Your accepted shifts"
+        offers={committed}
+        physicianId={physicianId}
+        simulationTime={simulationTime}
+      />
+      <Section
+        title="Past offers"
+        offers={past}
+        physicianId={physicianId}
+        simulationTime={simulationTime}
+      />
     </div>
   );
 }

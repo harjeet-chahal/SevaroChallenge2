@@ -6,6 +6,12 @@ Eligibility first (every off-shift physician, every rule), then finite offer opt
 pass every rule, then CP-SAT. The chosen plan is re-scored with the Phase 3 coverage
 engine itself, so the reported before/after figures come from the same model as the
 dashboard, not from the optimizer's own arithmetic.
+
+Voluntary availability (off-shift portal): the plan above is the *reference*. When an
+eligible physician has a valid offer inside a window they volunteered, CP-SAT re-solves
+with the same number of physicians and each hospital within ``coverage_tolerance`` of the
+reference's deficit reduction, maximizing the gap covered by volunteers (see cpsat.py and
+ranking.py). Without volunteers the result is exactly the reference.
 """
 
 from __future__ import annotations
@@ -15,10 +21,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.engines.analysis import OperationalAnalysis
-from app.engines.coverage_prediction import Window, hypothetical_window
 from app.engines.optimization.config import OptimizationConfig
 from app.engines.optimization.solvers import SolverUnavailableError
 from app.engines.optimization.split_shift.candidates import (
+    PROPOSED_REASON,
+    AvailabilityWindow,
     Candidate,
     Decline,
     Option,
@@ -28,12 +35,22 @@ from app.engines.optimization.split_shift.candidates import (
     evaluate_candidates,
     generate_options,
     offer_checks,
+    proposed_window,
 )
 from app.engines.optimization.split_shift.cpsat import (
     StaffingSolution,
+    VoluntaryConstraint,
     build_pieces,
     solve_cpsat,
     solve_greedy,
+    solve_greedy_voluntary,
+)
+from app.engines.optimization.split_shift.ranking import (
+    cost_estimate,
+    money,
+    paid_minutes,
+    rank_for_need,
+    voluntary_match,
 )
 from app.engines.optimization.split_shift.trap import (
     protection_for,
@@ -44,13 +61,16 @@ from app.engines.optimization.split_shift.trap import (
 from app.engines.timeline import fmt_local
 from app.schemas.dispatch import SolverRun
 from app.schemas.staffing import (
+    CostComparison,
     HospitalEffect,
+    NeedRanking,
+    PlanCost,
     ShiftRecommendation,
     StaffingResult,
     StaffingTotals,
+    VoluntaryMatch,
+    VoluntarySummary,
 )
-
-PROPOSED_REASON = "proposed split shift — projected if accepted, not confirmed"
 
 RULES_TEXT = [
     "Opted in to split-shift offers (brief).",
@@ -71,12 +91,18 @@ class StaffingInternals:
     candidates: list[Candidate]
     options: list[Option]
     solution: StaffingSolution
+    reference: StaffingSolution | None = None
+    """The plan without voluntary availability (None: identical to ``solution``)."""
 
+    @property
+    def reference_plan(self) -> list[Option]:
+        return (self.reference or self.solution).chosen
 
-def proposed_window(option: Option) -> Window:
-    return hypothetical_window(
-        option.physician_id, option.name, option.online_at, option.end, PROPOSED_REASON
-    )
+    def rank(self, need: list[str]) -> NeedRanking:
+        """Ranked physicians for one coverage need (see ranking.py)."""
+        return rank_for_need(
+            self.ctx, self.candidates, self.options, need, self.solution.chosen, self.reference_plan
+        )
 
 
 def evaluate_plan(
@@ -107,6 +133,89 @@ def solve_staffing(ctx: PlanningContext, options: list[Option]) -> StaffingSolut
     if not ctx.cfg.solver.allow_fallback:
         raise SolverUnavailableError("OR-Tools (CP-SAT) is not installed")
     return solve_greedy(ctx, options)
+
+
+def voluntary_constraint(
+    ctx: PlanningContext, options: list[Option], reference: StaffingSolution
+) -> VoluntaryConstraint | None:
+    """Limits for the voluntary re-solve, or None when no volunteer can help: no offer lies
+    inside a volunteered window and covers a deficit, or the reference contacts nobody."""
+    if not ctx.cfg.voluntary.enabled or not reference.chosen:
+        return None
+    if reference.status not in ("OPTIMAL", "FEASIBLE", "FALLBACK"):
+        return None
+    ids = frozenset(o.index for o in options if ctx.window_for(o.physician_id, o.start, o.end))
+    if not ids:
+        return None
+    pieces = build_pieces(ctx, options)
+    if not any(p.base_deficit > 0 and ids & set(p.covering) for p in pieces):
+        return None
+    chosen = {o.index for o in reference.chosen}
+    base: dict[str, int] = {}
+    left: dict[str, int] = {}
+    for p in pieces:
+        covered = sum(
+            1
+            for i in p.covering
+            if i in chosen and p.hospital_id in reference.assigned_hospitals.get(i, ())
+        )
+        base[p.hospital_id] = base.get(p.hospital_id, 0) + p.seconds * p.base_deficit
+        left[p.hospital_id] = left.get(p.hospital_id, 0) + p.seconds * max(
+            0, p.base_deficit - covered
+        )
+    tol = ctx.cfg.voluntary.coverage_tolerance
+    volunteered = {h for o in options if o.index in ids for h in o.hospitals}
+    return VoluntaryConstraint(
+        option_indices=ids,
+        physicians=len(reference.chosen),
+        max_deficit_seconds={
+            h: left[h] + (int(tol * (base[h] - left[h])) if h in volunteered else 0) for h in base
+        },
+    )
+
+
+def solve_with_voluntary(
+    ctx: PlanningContext, options: list[Option]
+) -> tuple[StaffingSolution, StaffingSolution | None]:
+    """(final solution, reference) — the reference is None when voluntary availability
+    could not change anything (the final solution *is* the reference)."""
+    reference = solve_staffing(ctx, options)
+    constraint = voluntary_constraint(ctx, options, reference)
+    if constraint is None:
+        return reference, None
+    if reference.fallback_used:
+        second = solve_greedy_voluntary(ctx, options, reference, constraint)
+    else:
+        second = solve_cpsat(ctx, options, constraint) or solve_greedy_voluntary(
+            ctx, options, reference, constraint
+        )
+    if not second.chosen and reference.chosen:
+        return reference, None  # never worse than the reference (defensive)
+    combined = StaffingSolution(
+        chosen=second.chosen,
+        assigned_hospitals=second.assigned_hospitals,
+        status=second.status
+        if reference.status == "OPTIMAL" or second.status == "FALLBACK"
+        else reference.status,
+        proven_optimal=reference.proven_optimal and second.proven_optimal,
+        stages=[
+            *reference.stages,
+            *(
+                {
+                    **st,
+                    "name": st["name"] if st["name"] == "voluntary" else f"voluntary:{st['name']}",
+                }
+                for st in second.stages
+            ),
+        ],
+        wall_time_ms=round(reference.wall_time_ms + second.wall_time_ms, 3),
+        deficit_seconds=second.deficit_seconds,
+        best_bound=second.best_bound,
+        solver=second.solver,
+        fallback_used=reference.fallback_used or second.fallback_used,
+        notes=[*reference.notes, *second.notes],
+    )
+    return combined, reference
 
 
 def staffing_baseline(ctx: PlanningContext, options: list[Option]) -> list[Option]:
@@ -209,6 +318,14 @@ def _recommendation(
     ]
     if cand.eligibility.online_time_assumed:
         explanation.insert(1, "Time to come online is missing; an assumed value is used.")
+    match = voluntary_match(ctx, cand, hospitals, option=o)
+    if match is not None:
+        explanation.insert(1, f"Voluntary availability: {match.message}")
+    cost = cost_estimate(ctx.cfg, paid_minutes(ctx.cfg, o.minutes, cand.online_minutes), reduction)
+    explanation.insert(
+        -1,
+        f"Estimated cost {money(ctx.cfg, cost.amount)}: {cost.note}.",
+    )
     return ShiftRecommendation(
         physician_id=o.physician_id,
         display_name=o.name,
@@ -224,6 +341,8 @@ def _recommendation(
         excess_physician_minutes=excess,
         protection=protection,
         explanation=explanation,
+        voluntary=match,
+        cost=cost,
     )
 
 
@@ -274,21 +393,162 @@ def _infeasibility(
     return lines
 
 
+def _plan_cost(
+    ctx: PlanningContext,
+    candidates: dict[str, Candidate],
+    options: list[Option],
+    chosen: list[Option],
+    reduction: float,
+    reference: StaffingSolution | None,
+) -> PlanCost | None:
+    """The recommended plan's estimated cost and the same cost model applied to the
+    alternatives: the plan without voluntary availability and the manual heuristic."""
+    if not chosen:
+        return None
+    cfg = ctx.cfg
+
+    def paid(opts: list[Option]) -> int:
+        return sum(
+            paid_minutes(cfg, o.minutes, candidates[o.physician_id].online_minutes) for o in opts
+        )
+
+    recommended = cost_estimate(cfg, paid(chosen), reduction)
+    before = sum(ctx.base_deficit.values())
+    comparisons: list[CostComparison] = []
+
+    def compare(label: str, opts: list[Option], assigned, why: str) -> None:
+        after, _ = evaluate_plan(ctx, opts, assigned)
+        left = round(sum(after.values()), 4)
+        cost = cost_estimate(cfg, paid(opts), round(before - left, 4))
+        saving = round(cost.amount - recommended.amount, 2)
+        delta = cost.paid_minutes - recommended.paid_minutes
+        if saving > 0:
+            verdict = f"simulated saving {money(cfg, saving)} ({delta} fewer paid minutes)"
+        elif saving < 0:
+            verdict = (
+                f"the recommendation costs {money(cfg, -saving)} more ({-delta} more paid minutes)"
+            )
+        else:
+            verdict = "same paid time, no simulated saving"
+        comparisons.append(
+            CostComparison(
+                label=label,
+                physician_names=[o.name for o in opts],
+                cost=cost,
+                deficit_after=left,
+                saving=saving,
+                explanation=f"{why} {money(cfg, cost.amount)} vs {money(cfg, recommended.amount)}: "
+                f"{verdict}. Deficit left {left:g} vs "
+                f"{round(before - reduction, 4):g} physician-minutes.",
+            )
+        )
+
+    if reference is not None and {
+        (o.physician_id, o.start, o.minutes) for o in reference.chosen
+    } != {(o.physician_id, o.start, o.minutes) for o in chosen}:
+        compare(
+            "Plan without voluntary availability",
+            reference.chosen,
+            reference.assigned_hospitals,
+            "Who the optimizer would ask if nobody had volunteered:",
+        )
+    baseline = staffing_baseline(ctx, options)
+    if baseline:
+        compare(
+            "Manual heuristic (earliest online, longest valid offer)",
+            baseline,
+            {o.index: o.hospitals for o in baseline},
+            "A coordinator calling whoever is online soonest for the longest valid shift:",
+        )
+    return PlanCost(
+        recommended=recommended,
+        comparisons=comparisons,
+        assumptions=[
+            f"Cost = paid offer minutes × {money(cfg, cfg.cost.hourly_rate)}/h, an illustrative "
+            "rate (the dataset has no pay data); the same rate for every physician, so "
+            "volunteering never lowers a physician's cost.",
+            "The whole offer is paid, including the time to come online."
+            if cfg.cost.paid_includes_time_to_online
+            else "Only the time after coming online is paid.",
+            "All figures are simulated (projected if accepted). A saving is confirmed only from "
+            "a completed shift, on the intervention that ran it.",
+        ],
+    )
+
+
+def _voluntary_summary(
+    ctx: PlanningContext,
+    chosen: list[Option],
+    reference: StaffingSolution | None,
+    rankings: list[NeedRanking],
+) -> VoluntarySummary:
+    windows = sum(len(ws) for ws in ctx.availability.values())
+    tol = ctx.cfg.voluntary.coverage_tolerance
+    ref = reference.chosen if reference is not None else chosen
+    applied = {(o.physician_id, o.start, o.minutes) for o in ref} != {
+        (o.physician_id, o.start, o.minutes) for o in chosen
+    }
+    lines: list[str] = []
+    if not ctx.cfg.voluntary.enabled:
+        lines.append("Voluntary availability is switched off in the policy.")
+    elif not windows:
+        lines.append("No off-shift physician has shared voluntary availability.")
+    else:
+        lines.append(
+            f"{windows} voluntary availability window(s) shared by off-shift physicians. They "
+            "count only for offers that pass every split-shift rule and fit inside the window."
+        )
+        if applied:
+            lines.append(
+                f"Voluntary availability changed the plan: {', '.join(o.name for o in chosen)} "
+                f"instead of {', '.join(o.name for o in ref) or 'nobody'} (same number of "
+                f"physicians; each hospital keeps at least {1 - tol:.0%} of the deficit "
+                "reduction of the plan without it)."
+            )
+        else:
+            volunteers = {
+                e.display_name
+                for r in rankings
+                for e in r.entries
+                if e.voluntary is not None and e.voluntary.status != "applied"
+            }
+            lines.append(
+                "The plan is unchanged"
+                + (
+                    f": {', '.join(sorted(volunteers))} — see each physician's voluntary status."
+                    if volunteers
+                    else "."
+                )
+            )
+    return VoluntarySummary(
+        active_windows=windows,
+        applied=applied,
+        coverage_tolerance=tol,
+        reference_physicians=[o.name for o in ref],
+        explanation=lines,
+    )
+
+
 def run_staffing(
     analysis: OperationalAnalysis,
     cfg: OptimizationConfig,
     offer_log: Mapping[str, tuple[int, int]] | None = None,
     declines: Mapping[str, list[Decline]] | None = None,
+    availability: Mapping[str, list[AvailabilityWindow]] | None = None,
 ) -> tuple[StaffingResult, StaffingInternals]:
     """``offer_log``: physician_id -> (open offers or committed split shifts, offers sent
-    in the rolling 7 days); ``declines``: physician_id -> declined offers. Both from the
-    Phase 5 workflow tables."""
+    in the rolling 7 days); ``declines``: physician_id -> declined offers; ``availability``:
+    physician_id -> voluntary availability windows. All from the Phase 5 workflow tables."""
     ctx = build_planning_context(analysis, cfg)
     ctx.offer_log = dict(offer_log or {})
     ctx.declines = {pid: list(rows) for pid, rows in (declines or {}).items()}
+    ctx.availability = {
+        pid: [w for w in rows if w.end > ctx.as_of] for pid, rows in (availability or {}).items()
+    }
+    ctx.availability = {pid: rows for pid, rows in ctx.availability.items() if rows}
     candidates = evaluate_candidates(ctx)
     options = generate_options(candidates, ctx)
-    solution = solve_staffing(ctx, options)
+    solution, reference = solve_with_voluntary(ctx, options)
     chosen = sorted(solution.chosen, key=lambda o: (o.online_at, o.physician_id))
     after, excess = evaluate_plan(ctx, chosen, solution.assigned_hospitals)
     by_id = {c.physician_id: c for c in candidates}
@@ -297,9 +557,23 @@ def run_staffing(
         for o in chosen
     ]
     chosen_by_physician = {o.physician_id: o for o in chosen}
+    internals = StaffingInternals(ctx, candidates, options, solution, reference)
+    rankings = [internals.rank([hid]) for hid in ctx.gap_hospitals]
+    matches: dict[str, VoluntaryMatch] = {}
+    for ranking in rankings:
+        for entry in ranking.entries:
+            if entry.voluntary is not None and (
+                entry.physician_id not in matches or entry.voluntary.status == "applied"
+            ):
+                matches[entry.physician_id] = entry.voluntary
     rows = []
     for c in candidates:
         row = c.eligibility
+        match = matches.get(c.physician_id) or voluntary_match(
+            ctx, c, c.scope or c.state.credentialed_hospital_ids, option=None
+        )
+        if match is not None:
+            row = row.model_copy(update={"voluntary": match})
         o = chosen_by_physician.get(c.physician_id)
         if o is not None:
             row = row.model_copy(
@@ -374,6 +648,17 @@ def run_staffing(
                 f"Recommended plan reduces the deficit to {after_total:g} physician-minutes "
                 f"with {len(recommendations)} offer(s) (projected if accepted)."
             )
+        voluntary_applied = reference is not None and {
+            (o.physician_id, o.start, o.minutes) for o in reference.chosen
+        } != {(o.physician_id, o.start, o.minutes) for o in chosen}
+        if voluntary_applied:
+            volunteers = [o.name for o in chosen if ctx.window_for(o.physician_id, o.start, o.end)]
+            explanations.append(
+                f"Voluntary availability: {', '.join(volunteers)} "
+                f"volunteered for this time and is asked instead of "
+                f"{', '.join(o.name for o in reference.chosen)} (coverage within "
+                f"{cfg.voluntary.coverage_tolerance:.0%})."
+            )
         elif solution.status == "INFEASIBLE":
             explanations.append("No combination of eligible offers satisfies the requirements.")
         else:
@@ -393,6 +678,12 @@ def run_staffing(
         "Offer lengths considered: "
         f"{', '.join(str(m) for m in cfg.staffing.duration_options_minutes)} min, plus exactly "
         "up to the next scheduled shift when shorter.",
+        "Voluntary availability is a preference after every rule: a volunteer's offer inside "
+        "their window may replace another physician if each hospital keeps at least "
+        f"{1 - cfg.voluntary.coverage_tolerance:.0%} of the deficit reduction (same number of "
+        "physicians).",
+        f"Estimated cost = paid offer minutes × {money(cfg, cfg.cost.hourly_rate)}/h "
+        "(illustrative; same rate for every physician).",
     ]
     trap = None
     if recommendations:
@@ -422,8 +713,18 @@ def run_staffing(
         rules=RULES_TEXT,
         assumptions=assumptions,
         explanations=explanations,
+        rankings=rankings,
+        voluntary=_voluntary_summary(ctx, chosen, reference, rankings),
+        cost=_plan_cost(
+            ctx,
+            by_id,
+            options,
+            chosen,
+            round(before_total - after_total, 4),
+            reference,
+        ),
     )
-    return result, StaffingInternals(ctx, candidates, options, solution)
+    return result, internals
 
 
 def describe_option(
@@ -435,8 +736,11 @@ def describe_option(
 
 
 __all__ = [
+    "PROPOSED_REASON",
+    "AvailabilityWindow",
     "Candidate",
     "Decline",
+    "rank_for_need",
     "describe_option",
     "protection_for",
     "seed_count",
@@ -454,5 +758,6 @@ __all__ = [
     "proposed_window",
     "run_staffing",
     "solve_staffing",
+    "solve_with_voluntary",
     "staffing_baseline",
 ]

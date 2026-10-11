@@ -2,7 +2,8 @@
 
 Nothing here writes to the database: no assignment, offer or staffing change is made.
 Phase 5 inputs are read, not written: the analysis includes accepted/activated split
-shifts (workflow overlay) and the staffing rules use the workflow's offer log.
+shifts (workflow overlay), the staffing rules use the workflow's offer log and the ranking
+uses physicians' voluntary availability.
 Results are cached per (data_version, as_of, risk-rules signature, optimizer-policy
 signature, parameters), so a new event, an import, a clock move or a policy change always
 recomputes. The solvers are deterministic (single worker, fixed seed), so a cache hit and
@@ -32,6 +33,7 @@ from app.engines.optimization import (
     staffing_section,
     trap_section,
 )
+from app.repositories.availability import AvailabilityRepository
 from app.repositories.system import SystemRepository
 from app.repositories.workflow import WorkflowRepository
 from app.schemas.dispatch import DispatchResult
@@ -95,9 +97,9 @@ class OptimizationService:
         )
 
     def _staffing(self, analysis: OperationalAnalysis, cfg: OptimizationConfig):
-        # Notification limits and declines come from the workflow's offer log, which changes
-        # without a data-version bump (e.g. an offer sent or declined): key on the workflow
-        # version.
+        # Notification limits, declines and voluntary availability come from the workflow
+        # tables, which change without a data-version bump (e.g. an offer declined, a window
+        # shared or withdrawn): key on the workflow version (every change is audited).
         workflow = WorkflowRepository(self.session)
         key = (*self._key("staffing", analysis, cfg), workflow.workflow_version())
         window = WorkflowPolicy().week_window
@@ -111,6 +113,7 @@ class OptimizationService:
                 cfg,
                 offer_log=workflow.offer_log(as_of, window, import_id),
                 declines=workflow.declines(as_of, import_id),
+                availability=AvailabilityRepository(self.session).windows(import_id),
             ),
         )
 

@@ -3,7 +3,7 @@
 import { FilePlus2, Loader2, RefreshCw, Send } from "lucide-react";
 import { useState } from "react";
 
-import { TagBadge } from "@/components/shared/status-badges";
+import { TagBadge, VoluntaryBadge } from "@/components/shared/status-badges";
 import { useSystemStatus } from "@/components/status/system-status-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -187,6 +187,7 @@ export function InterventionComposer({ className }: { className?: string }) {
                       />
                       <span>
                         <span className="font-medium">{c.display_name}</span>{" "}
+                        <VoluntaryBadge match={c.voluntary} />{" "}
                         <span className="text-xs text-muted-foreground">{c.summary}</span>
                       </span>
                     </label>

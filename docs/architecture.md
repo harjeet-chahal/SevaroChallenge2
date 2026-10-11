@@ -53,6 +53,7 @@ error response looks like this:
 | `baseline_volume`         | Mean/p90 consults per hospital per local hour (Phase 3)          |
 | `reference_snapshot_rows` | Snapshot rows, kept verbatim for verification only               |
 | `wf_interventions`, `wf_approvals`, `wf_offers`, `wf_offer_responses`, `wf_audit_log` | Phase 5 workflow persistence (see [workflow.md](workflow.md)). The Phase 1 placeholder tables `interventions`, `offers`, `audit_log` are no longer used |
+| `wf_availability` | Voluntary availability shared by off-shift physicians (see [voluntary-availability.md](voluntary-availability.md)) |
 
 No migrations in the hackathon: `create_all` runs on startup, and a schema-version
 mismatch rebuilds the database (re-import the dataset afterwards).

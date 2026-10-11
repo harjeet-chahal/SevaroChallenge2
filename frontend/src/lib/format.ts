@@ -60,3 +60,17 @@ export function formatElapsed(seconds: number): string {
 export function formatCount(n: number, singular: string, plural = `${singular}s`): string {
   return `${n} ${n === 1 ? singular : plural}`;
 }
+
+/** "$800" — an amount the backend computed, shown in its currency. */
+export function formatMoney(amount: number, currency = "USD"): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      currencyDisplay: "narrowSymbol",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${Math.round(amount)} ${currency}`;
+  }
+}

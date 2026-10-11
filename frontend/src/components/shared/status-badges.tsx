@@ -1,6 +1,6 @@
-import { FlaskConical } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, HandHeart } from "lucide-react";
 
-import type { Availability, ConsultStage } from "@/lib/api/types";
+import type { Availability, ConsultStage, VoluntaryMatch, VoluntaryStatus } from "@/lib/api/types";
 import { AVAILABILITY_LABELS, STAGE_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +75,66 @@ export function TagBadge({
   return (
     <span title={title} className={cn(chip, "font-medium", tones[tone])}>
       {children}
+    </span>
+  );
+}
+
+const VOLUNTARY_NOTES: Record<VoluntaryStatus, string | null> = {
+  applied: null,
+  not_eligible: "not eligible",
+  no_shortage_overlap: "outside the shortage",
+  no_offer_fits: "window too short",
+  outside_tolerance: "covers less",
+  not_needed: "not needed",
+  disabled: "not used",
+};
+
+/**
+ * The physician shared voluntary availability. Green only when it counts for this offer
+ * (inside the window, every rule passed); otherwise muted, with the reason in words.
+ */
+export function VoluntaryBadge({
+  match,
+  className,
+}: {
+  match: VoluntaryMatch | null | undefined;
+  className?: string;
+}) {
+  if (!match) return null;
+  const note = VOLUNTARY_NOTES[match.status];
+  return (
+    <span
+      title={match.message}
+      className={cn(
+        chip,
+        note === null
+          ? "border-success-border bg-success-soft text-success"
+          : "border-border bg-muted text-muted-foreground",
+        className,
+      )}
+    >
+      <HandHeart className="size-3" aria-hidden />
+      Voluntarily Available
+      {note ? <span className="font-normal">· {note}</span> : null}
+      <span className="sr-only">. {match.message}</span>
+    </span>
+  );
+}
+
+/** Rank change caused by voluntary availability ("Up from #2"). */
+export function RankMovement({ movement, from }: { movement: number; from: number | null }) {
+  if (!movement || from === null) return null;
+  const up = movement > 0;
+  const Icon = up ? ArrowUp : ArrowDown;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap",
+        up ? "text-success" : "text-muted-foreground",
+      )}
+    >
+      <Icon className="size-3" aria-hidden />
+      {up ? "Up" : "Down"} from #{from}
     </span>
   );
 }

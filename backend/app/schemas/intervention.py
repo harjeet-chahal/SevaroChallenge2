@@ -25,7 +25,16 @@ from pydantic import AwareDatetime, Field
 from app.schemas.common import ActorRef, ApiModel, EntityId, Severity
 from app.schemas.dispatch import Exclusion, RuleCheck
 from app.schemas.offer import ShiftOffer
-from app.schemas.staffing import CandidateEligibility, HospitalEffect, TrapAnalysis
+from app.schemas.staffing import (
+    CandidateEligibility,
+    CostComparison,
+    CostEstimate,
+    HospitalEffect,
+    NeedRanking,
+    PlanCost,
+    TrapAnalysis,
+    VoluntaryMatch,
+)
 
 
 class InterventionType(StrEnum):
@@ -119,6 +128,10 @@ class InterventionRecommendation(ApiModel):
     uncertainty: list[str] = Field(default_factory=list)
     restrictions: list[str] = Field(default_factory=list)
     approver_role: Literal["clinical_lead", "coordinator"]
+    ranking: NeedRanking | None = None
+    """Split shift: physicians ranked for this need at proposal time (who to ask first)."""
+    cost: PlanCost | None = None
+    """Split shift: estimated cost of the primary offer and of the alternatives (simulated)."""
 
 
 class OfferPlanItem(ApiModel):
@@ -146,6 +159,10 @@ class OfferPlanItem(ApiModel):
     """Every split-shift rule evaluated for this exact offer (start, length, hospitals)."""
     projected_effects: list[HospitalEffect] = Field(default_factory=list)
     """Deficit before/after if *this* offer alone is accepted (modeled, not confirmed)."""
+    voluntary: VoluntaryMatch | None = None
+    """The physician's voluntary availability for this offer, if they shared any."""
+    cost: CostEstimate | None = None
+    """Estimated cost of this offer if accepted (simulated)."""
 
 
 class HospitalImpact(ApiModel):
@@ -240,6 +257,10 @@ class Intervention(ApiModel):
     offers: list[ShiftOffer] = Field(default_factory=list)
     allowed_actions: list[InterventionAction] = Field(default_factory=list)
     is_terminal: bool
+    confirmed_cost: CostEstimate | None = None
+    """Cost of split shifts actually completed under this intervention (None until then)."""
+    confirmed_savings: list[CostComparison] = Field(default_factory=list)
+    """Confirmed cost against each alternative's projected cost (only once completed)."""
 
 
 class InterventionPage(ApiModel):

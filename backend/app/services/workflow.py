@@ -50,6 +50,7 @@ from app.engines.optimization.split_shift import (
     Candidate,
     Option,
     PlanningContext,
+    StaffingInternals,
     build_planning_context,
     describe_option,
     offer_checks,
@@ -57,8 +58,10 @@ from app.engines.optimization.split_shift import (
     protection_for,
     seed_count,
     seed_peers,
+    staffing_baseline,
     trap_analysis,
 )
+from app.engines.optimization.split_shift.ranking import cost_estimate, money, paid_minutes
 from app.engines.timeline import fmt_local
 from app.repositories import EventRepository, ReferenceRepository, SystemRepository
 from app.repositories.workflow import WorkflowRepository
@@ -101,7 +104,7 @@ from app.schemas.offer import (
     ShiftOffer,
 )
 from app.schemas.offer import OfferResponseRecord as ResponseView
-from app.schemas.staffing import TrapAnalysis
+from app.schemas.staffing import CostComparison, CostEstimate, NeedRanking, PlanCost, TrapAnalysis
 from app.schemas.whatif import AssignConsultAction
 from app.services.analysis import AnalysisCache, AnalysisService
 from app.services.optimization import OptimizationService
@@ -887,6 +890,8 @@ class WorkflowService:
                     eligible=not failed and not problems,
                     checks=checks,
                     projected_effects=described.effects,
+                    voluntary=described.voluntary,
+                    cost=described.cost,
                 )
             )
             if index == 0:
@@ -962,7 +967,21 @@ class WorkflowService:
                 ],
             )
 
+        ranking = internals.rank(need)
+        primary_entry = next(
+            (e for e in ranking.entries if plan and e.physician_id == plan[0].physician_id), None
+        )
         why: list[str] = []
+        if primary_entry is not None and primary_entry.rank is not None:
+            why.append(
+                f"Ranked #{primary_entry.rank} of "
+                f"{sum(e.rank is not None for e in ranking.entries)} eligible for this need"
+                + (
+                    f" (#{primary_entry.rank_without_voluntary} without voluntary availability)."
+                    if primary_entry.movement
+                    else "."
+                )
+            )
         if primary_desc is not None:
             why.extend(primary_desc.explanation)
         why.extend(staffing.explanations)
@@ -1028,8 +1047,8 @@ class WorkflowService:
                     type=T.SPLIT_SHIFT,
                     label=f"Offer to another eligible physician ({', '.join(other_eligible)})",
                     available=True,
-                    reason="Eligible, but not in the optimal plan (later online time or less "
-                    "coverage); can be added as a backup.",
+                    reason="Eligible, but ranked lower for this need (coverage, voluntary "
+                    "availability, cost, online time; see the ranking); can be added as a backup.",
                 )
             )
         in_plan = primary_cand is not None and primary_cand.physician_id in recommended
@@ -1055,6 +1074,8 @@ class WorkflowService:
             uncertainty=uncertainty,
             restrictions=restrictions,
             approver_role="clinical_lead",
+            ranking=ranking,
+            cost=self._need_cost(ctx, internals, ranking, plan, need),
         )
         title = (
             f"Split shift: {plan[0].display_name} for {', '.join(names.get(h, h) for h in need)}"
@@ -1084,6 +1105,158 @@ class WorkflowService:
             blocking=blocking,
             warnings=warnings,
         )
+
+    def _need_cost(
+        self,
+        ctx: PlanningContext,
+        internals: StaffingInternals,
+        ranking: NeedRanking,
+        plan: list[OfferPlanItem],
+        need: Sequence[str],
+    ) -> PlanCost | None:
+        """Estimated cost of the primary offer vs the other ranked physicians and the manual
+        heuristic for this need, with one cost model (simulated, projected if accepted)."""
+        primary = plan[0] if plan else None
+        if primary is None or primary.cost is None:
+            return None
+        cfg = ctx.cfg
+        recommended = primary.cost
+        base = round(sum(ctx.base_deficit.get(h, 0.0) for h in need), 4)
+        comparisons: list[CostComparison] = []
+
+        def verdict(saving: float, delta: int) -> str:
+            if saving > 0:
+                return f"simulated saving {money(cfg, saving)} ({delta} fewer paid minutes)"
+            if saving < 0:
+                return f"the proposal costs {money(cfg, -saving)} more ({-delta} more paid minutes)"
+            return "same paid time, no simulated saving"
+
+        for entry in ranking.entries:
+            if entry.rank is None or entry.cost is None:
+                continue
+            if entry.physician_id == primary.physician_id or len(comparisons) >= 3:
+                continue
+            saving = round(entry.cost.amount - recommended.amount, 2)
+            delta = entry.cost.paid_minutes - recommended.paid_minutes
+            label = f"#{entry.rank} {entry.display_name}"
+            if entry.rank_without_voluntary == 1 and entry.movement < 0:
+                label += " (first choice without voluntary availability)"
+            comparisons.append(
+                CostComparison(
+                    label=label,
+                    physician_names=[entry.display_name],
+                    cost=entry.cost,
+                    deficit_after=round(base - entry.coverage_physician_minutes, 4),
+                    saving=saving,
+                    explanation=f"{money(cfg, entry.cost.amount)} vs "
+                    f"{money(cfg, recommended.amount)}: {verdict(saving, delta)}. Removes "
+                    f"{entry.coverage_physician_minutes:g} vs "
+                    f"{recommended.covered_physician_minutes:g} deficit physician-minutes.",
+                )
+            )
+        options = [o for o in internals.options if set(o.hospitals) & set(need)]
+        manual = staffing_baseline(ctx, options)[:1]
+        if manual:
+            o = manual[0]
+            cand = next(c for c in internals.candidates if c.physician_id == o.physician_id)
+            covered = round(
+                sum(
+                    ctx.base_deficit[h]
+                    - ctx.models[h].deficit_physician_minutes([proposed_window(o)])
+                    for h in need
+                    if h in o.hospitals and h in ctx.models
+                ),
+                4,
+            )
+            cost = cost_estimate(cfg, paid_minutes(cfg, o.minutes, cand.online_minutes), covered)
+            saving = round(cost.amount - recommended.amount, 2)
+            comparisons.append(
+                CostComparison(
+                    label="Manual heuristic (earliest online, longest valid offer)",
+                    physician_names=[o.name],
+                    cost=cost,
+                    deficit_after=round(base - covered, 4),
+                    saving=saving,
+                    explanation=f"{o.name} for {o.minutes} min: {money(cfg, cost.amount)} vs "
+                    f"{money(cfg, recommended.amount)}: "
+                    f"{verdict(saving, cost.paid_minutes - recommended.paid_minutes)}.",
+                )
+            )
+        return PlanCost(
+            recommended=recommended,
+            comparisons=comparisons,
+            assumptions=[
+                f"Cost = paid offer minutes × {money(cfg, cfg.cost.hourly_rate)}/h, an "
+                "illustrative rate; the same for every physician (volunteers are not assumed "
+                "to cost less).",
+                "Backup offers cost nothing unless accepted; only one acceptance binds per "
+                "physician needed.",
+                "Simulated until the shift is completed; the confirmed cost then appears on "
+                "this intervention.",
+            ],
+        )
+
+    def _confirmed_cost(
+        self, rec: InterventionRecord, offers: list[OfferRecord]
+    ) -> tuple[CostEstimate | None, list[CostComparison]]:
+        """Cost from split shifts actually worked under this intervention (completed, or
+        cancelled after going online), against each alternative's projected cost."""
+        if rec.type != T.SPLIT_SHIFT.value:
+            return None, []
+        worked = [
+            o
+            for o in offers
+            if o.ended_at is not None
+            and o.activated_at is not None
+            and o.status in (O.COMPLETED.value, O.CANCELLED.value)
+        ]
+        if not worked:
+            return None, []
+        cfg = self.optimizer.config()
+        paid = sum(
+            paid_minutes(
+                cfg,
+                max(0, int((o.ended_at - o.start_at).total_seconds() // 60)),  # type: ignore[operator]
+                o.minutes_to_online,
+            )
+            for o in worked
+        )
+        plan = {i["physician_id"]: i for i in rec.offer_plan or []}
+        covered = sum(
+            (plan.get(o.physician_id, {}).get("cost") or {}).get("covered_physician_minutes", 0.0)
+            for o in worked
+        )
+        confirmed = cost_estimate(
+            cfg,
+            paid,
+            covered,
+            basis="confirmed",
+            note=f"{paid} paid min worked × {money(cfg, cfg.cost.hourly_rate)}/h from the "
+            "completed shift (coverage figure as projected at proposal).",
+        )
+        stored = (rec.recommendation or {}).get("cost") or {}
+        savings = []
+        for c in stored.get("comparisons", []):
+            alt = CostComparison.model_validate(c)
+            saving = round(alt.cost.amount - confirmed.amount, 2)
+            savings.append(
+                alt.model_copy(
+                    update={
+                        "saving": saving,
+                        "basis": "confirmed",
+                        "explanation": f"Confirmed cost {money(cfg, confirmed.amount)} (completed "
+                        f"shift) vs the projected {money(cfg, alt.cost.amount)} of {alt.label}: "
+                        + (
+                            f"saved {money(cfg, saving)}."
+                            if saving > 0
+                            else f"cost {money(cfg, -saving)} more."
+                            if saving < 0
+                            else "no difference."
+                        ),
+                    }
+                )
+            )
+        return confirmed, savings
 
     def _draft_reassignment(
         self, body: InterventionCreate, analysis: OperationalAnalysis, alert: Alert | None
@@ -1542,6 +1715,18 @@ class WorkflowService:
                     f"{name}: all {len(checks)} split-shift rules pass for this offer "
                     "(including ≤ 1 open offer and ≤ 3 per rolling 7 days from the offer log)."
                 )
+            # Voluntary availability is a preference, never a rule: a change since the
+            # proposal is reported for the approver, it does not block the approval.
+            volunteered = (item.get("voluntary") or {}).get("status") == "applied"
+            window = ctx.window_for(pid, start, datetime.fromisoformat(item["end_at"]))
+            if volunteered and window is None:
+                lines.append(
+                    f"{name} is no longer voluntarily available for this offer (availability "
+                    "withdrawn or changed since the proposal); the offer is still valid under "
+                    "the rules, but ask whether to re-rank."
+                )
+            elif window is not None:
+                lines.append(f"{name} is voluntarily available for this whole offer.")
         return lines, problems, None, plan
 
     # ------------------------------------------------------------------ offers --
@@ -1581,6 +1766,7 @@ class WorkflowService:
             analysis = self._analysis()
             staffing, internals = self.optimizer.staffing_with_internals(analysis)
             ctx = internals.ctx
+            shared = ctx.availability
             cands = {c.physician_id: c for c in internals.candidates}
             hospitals = {h.id: h for h in analysis.state.hospitals}
             consult_ids = [c.consult_id for c in analysis.state.consultations]
@@ -1681,11 +1867,17 @@ class WorkflowService:
                     None,
                 )
                 zone = self._hospital_zone(analysis, item["hospital_ids"])
+                volunteered = any(
+                    w.start <= datetime.fromisoformat(item["start_at"])
+                    and datetime.fromisoformat(item["end_at"]) <= w.end
+                    for w in shared.get(pid, [])
+                )
                 reason = offer_reason(
                     [hospitals[h].name for h in item["hospital_ids"] if h in hospitals],
                     shortfall,
                     zone,
                     surge,
+                    volunteered,
                 )
                 if find_disallowed([reason], consult_ids):  # defensive: never leak IDs
                     reason = "Short-term coverage gap at hospitals where you are credentialed."
@@ -2867,6 +3059,7 @@ class WorkflowService:
         offers = self.repo.offers_for(rec.id) if offers is None else offers
         approval = self.repo.approval_for(rec.id) if rec.id != "PREVIEW" else None
         status = S(rec.status)
+        confirmed_cost, confirmed_savings = self._confirmed_cost(rec, offers)
         return Intervention(
             id=rec.id,
             type=T(rec.type),
@@ -2904,6 +3097,8 @@ class WorkflowService:
             offers=[self._shift_offer(o, now, actor) for o in offers],
             allowed_actions=self._allowed(rec, actor.role) if rec.id != "PREVIEW" else [],
             is_terminal=status in TERMINAL_STATUSES,
+            confirmed_cost=confirmed_cost,
+            confirmed_savings=confirmed_savings,
         )
 
     def _shift_offer(self, o: OfferRecord, now: datetime, actor: ActorRef) -> ShiftOffer:

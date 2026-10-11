@@ -1,6 +1,9 @@
 import { apiRequest } from "./client";
 import type {
   AlertList,
+  AvailabilityPage,
+  PhysicianAvailabilityPage,
+  VolunteerAvailability,
   AuditPage,
   DemoUserRole,
   ExpireResult,
@@ -255,4 +258,42 @@ export const offersApi = {
     }),
   expireDue: (role: DemoUserRole) =>
     apiRequest<ExpireResult>("/api/offers/expire-due", { method: "POST", role }),
+};
+
+/**
+ * Voluntary availability from the off-shift portal. Sharing a window never assigns a
+ * shift: it is a ranking preference the coordinator's recommendations read.
+ */
+export const availabilityApi = {
+  mine: (physicianId: string, signal?: AbortSignal) =>
+    apiRequest<PhysicianAvailabilityPage>("/api/availability/mine", {
+      role: "physician",
+      actorId: physicianId,
+      signal,
+    }),
+  list: (role: DemoUserRole, scope: "active" | "all" = "active", signal?: AbortSignal) =>
+    apiRequest<AvailabilityPage>(`/api/availability${query({ scope })}`, { role, signal }),
+  create: (physicianId: string, startAt: string, endAt: string) =>
+    apiRequest<VolunteerAvailability>("/api/availability", {
+      method: "POST",
+      body: { start_at: startAt, end_at: endAt },
+      role: "physician",
+      actorId: physicianId,
+      timeoutMs: WORKFLOW_TIMEOUT_MS,
+    }),
+  update: (physicianId: string, id: string, startAt: string, endAt: string, version: number) =>
+    apiRequest<VolunteerAvailability>(`/api/availability/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: { start_at: startAt, end_at: endAt, expected_version: version },
+      role: "physician",
+      actorId: physicianId,
+      timeoutMs: WORKFLOW_TIMEOUT_MS,
+    }),
+  withdraw: (physicianId: string, id: string) =>
+    apiRequest<VolunteerAvailability>(`/api/availability/${encodeURIComponent(id)}/withdraw`, {
+      method: "POST",
+      role: "physician",
+      actorId: physicianId,
+      timeoutMs: WORKFLOW_TIMEOUT_MS,
+    }),
 };

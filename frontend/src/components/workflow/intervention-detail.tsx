@@ -9,10 +9,12 @@ import {
   UserRound,
 } from "lucide-react";
 
+import { CostSummary } from "@/components/optimization/cost-summary";
+import { RankedPhysicians } from "@/components/optimization/ranked-physicians";
 import { CheckMark, Bullets, Disclosure } from "@/components/optimization/shared";
 import { RULE_SHORT, TrapSummary } from "@/components/optimization/staffing-view";
 import { SeverityBadge } from "@/components/shared/severity-badge";
-import { TagBadge } from "@/components/shared/status-badges";
+import { TagBadge, VoluntaryBadge } from "@/components/shared/status-badges";
 import {
   Table,
   TableBody,
@@ -28,7 +30,13 @@ import type {
   OfferPlanItem,
   ShiftOffer,
 } from "@/lib/api/types";
-import { formatDateTime, formatDuration, formatElapsed, formatTime } from "@/lib/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatElapsed,
+  formatMoney,
+  formatTime,
+} from "@/lib/format";
 import { OFFER_STATUS_LABELS } from "@/lib/labels";
 
 import { OfferStatusBadge } from "./status";
@@ -170,6 +178,7 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
     <li className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="font-semibold text-navy">{item.display_name}</span>
+        <VoluntaryBadge match={item.voluntary} />
         <TagBadge tone={item.role === "primary" ? "info" : "neutral"}>
           {item.role === "primary" ? "Proposed physician" : "Backup"}
         </TagBadge>
@@ -200,6 +209,15 @@ function PlanItem({ item, tz }: { item: OfferPlanItem; tz?: string | null }) {
           <dt className="text-xs text-muted-foreground">Useful coverage</dt>
           <dd>{formatDuration(item.coverage_minutes)} after coming online</dd>
         </div>
+        {item.cost ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">Estimated cost (simulated)</dt>
+            <dd>
+              {formatMoney(item.cost.amount, item.cost.currency)} ·{" "}
+              {formatDuration(item.cost.paid_minutes)} paid
+            </dd>
+          </div>
+        ) : null}
       </dl>
       {item.projected_effects.length ? (
         <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -372,6 +390,23 @@ export function InterventionDetailView({
             ))}
           </ul>
         </Block>
+      ) : null}
+
+      {r.ranking && r.ranking.entries.length ? (
+        <RankedPhysicians
+          ranking={r.ranking}
+          tz={tz}
+          title={`Who to ask first — ranked at ${i.id === "PREVIEW" ? "this moment" : "proposal"}`}
+        />
+      ) : null}
+
+      {i.type === "split_shift" ? (
+        <CostSummary
+          cost={r.cost}
+          confirmed={i.confirmed_cost}
+          confirmedSavings={i.confirmed_savings}
+          label="Proposed offer"
+        />
       ) : null}
 
       {i.reassignment ? (

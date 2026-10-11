@@ -1,10 +1,10 @@
 "use client";
 
-import { Eye, Send, ShieldCheck, UserPlus } from "lucide-react";
+import { Eye, HandHeart, Send, ShieldCheck, UserPlus } from "lucide-react";
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { PendingActionButton } from "@/components/shared/pending-action-button";
-import { TagBadge } from "@/components/shared/status-badges";
+import { TagBadge, VoluntaryBadge } from "@/components/shared/status-badges";
 import { useAnalysis } from "@/components/state/analysis-provider";
 import { useOptionalWorkflow } from "@/components/workflow/workflow-provider";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ShiftRecommendation, StaffingResult, TrapAnalysis } from "@/lib/api/types";
-import { formatDuration, formatTime } from "@/lib/format";
+import { formatDuration, formatMoney, formatTime } from "@/lib/format";
 
+import { CostSummary } from "./cost-summary";
 import { useOptimization } from "./optimization-provider";
+import { RankedPhysicians } from "./ranked-physicians";
 import { Bullets, CheckMark, Disclosure, ProposedNote, SolverLine } from "./shared";
 
 export const RULE_SHORT: Record<string, string> = {
@@ -64,11 +66,18 @@ function ShiftCard({ rec, tz }: { rec: ShiftRecommendation; tz: string | undefin
         <div className="min-w-0 space-y-1">
           <p className="flex flex-wrap items-center gap-1.5">
             <span className="font-semibold text-navy">{rec.display_name}</span>
+            <VoluntaryBadge match={rec.voluntary} />
             <TagBadge tone="info">Recommendation · needs clinical-lead approval</TagBadge>
           </p>
           <p className="text-sm">
             {formatTime(rec.offer_start, tz)} – {formatTime(rec.offer_end, tz)} (
             {formatDuration(rec.offer_minutes)}) · online about {formatTime(rec.online_at, tz)}
+            {rec.cost ? (
+              <span className="text-muted-foreground">
+                {" "}
+                · est. {formatMoney(rec.cost.amount, rec.cost.currency)} (simulated)
+              </span>
+            ) : null}
           </p>
           <p className="text-xs text-muted-foreground">{rec.hospital_names.join(", ")}</p>
         </div>
@@ -198,8 +207,11 @@ export function TrapSummary({ trap }: { trap: TrapAnalysis }) {
 
 export function StaffingView({ data }: { data: StaffingResult }) {
   const zones = useHospitalZones();
+  const workflow = useOptionalWorkflow();
   const t = data.totals;
   const codes = data.candidates[0]?.checks.map((c) => c.code) ?? [];
+  const rankings = data.rankings.filter((r) => r.entries.some((e) => e.rank !== null));
+  const voluntary = data.voluntary;
   return (
     <div className="space-y-4">
       <SolverLine run={data.solver} />
@@ -236,6 +248,43 @@ export function StaffingView({ data }: { data: StaffingResult }) {
         />
       )}
 
+      {voluntary && voluntary.active_windows > 0 ? (
+        <p
+          className={
+            voluntary.applied
+              ? "flex gap-2 rounded-md border border-success-border bg-success-soft/50 p-2 text-xs"
+              : "flex gap-2 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground"
+          }
+        >
+          <HandHeart className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>{voluntary.explanation.slice(1).join(" ") || voluntary.explanation[0]}</span>
+        </p>
+      ) : null}
+
+      {rankings.length ? (
+        <div className="space-y-4">
+          {rankings.map((r) => (
+            <RankedPhysicians
+              key={r.hospital_ids.join(",")}
+              ranking={r}
+              tz={zones[r.hospital_ids[0]]}
+              onPropose={
+                workflow
+                  ? (e) =>
+                      workflow.openComposer({
+                        type: "split_shift",
+                        physicianIds: [e.physician_id],
+                        hospitalIds: r.hospital_ids,
+                      })
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <CostSummary cost={data.cost} label="Recommended plan" />
+
       {data.infeasibility.length ? (
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Gaps the plan cannot close</h3>
@@ -269,6 +318,7 @@ export function StaffingView({ data }: { data: StaffingResult }) {
                       <span className="block text-xs font-normal text-muted-foreground">
                         {c.roster_role ?? "role unknown"}
                       </span>
+                      <VoluntaryBadge match={c.voluntary} className="mt-1" />
                     </TableCell>
                     {c.checks.map((check) => (
                       <TableCell key={check.code} className="text-center">

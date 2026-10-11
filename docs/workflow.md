@@ -66,6 +66,7 @@ offer         sent      → accepted | declined | expired | withdrawn | redundan
 | `wf_offers` | One row per physician offered. Records status, hospitals, routing scope, seeded count, start/end, minutes to come online, generated reason, simulated channel, approver, sender, sent/expires/responded/accepted times, expected online, activation time and source, impact at activation, end time |
 | `wf_offer_responses` | Every reply attempt, including duplicates and refused ones, with its outcome and response time in simulated seconds |
 | `wf_audit_log` | Append-only. Records simulation time (`occurred_at`), wall time (`recorded_at`), actor, action, intervention/offer, from→to status, summary, details and data version |
+| `wf_availability` | Voluntary availability windows from the off-shift portal (a ranking preference, never an assignment). See [voluntary-availability.md](voluntary-availability.md) |
 
 The names are new, so existing databases gain these tables additively. `SCHEMA_VERSION` was not bumped, so no developer database is rebuilt. The Phase 1 placeholder tables (`interventions`, `offers`, `audit_log`) were never written to. Existing databases keep them unused; new databases no longer create them.
 
@@ -222,6 +223,7 @@ The Clinical Lead tab shows a pending-approval badge.
 | POST | `/api/offers/{id}/withdraw` | |
 | POST | `/api/offers/expire-due` | apply what is due now |
 | GET | `/api/live` | SSE version stream (`?once=true` for one event) |
+| GET/POST/PUT | `/api/availability…` | voluntary availability ("I'm Available"), see [voluntary-availability.md](voluntary-availability.md) |
 
 Errors use the standard envelope. Workflow codes include `approval_required`, `already_decided`, `stale_version`, `revalidation_failed`, `no_longer_required`, `proposal_invalid`, `offer_expired`, `offer_declined`, `offer_withdrawn`, `offer_limit_reached`, `shift_not_started` and `invalid_transition`.
 

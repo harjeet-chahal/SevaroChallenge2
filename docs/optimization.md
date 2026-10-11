@@ -199,6 +199,15 @@ Solver settings: 1 worker, fixed seed, a deterministic-time limit and a wall-clo
 **OPTIMAL** only if every stage is proven optimal, **FEASIBLE** if a stage hit its limit,
 **INFEASIBLE** if no plan satisfies every constraint.
 
+**Voluntary availability.** When an eligible physician has a valid offer inside a window
+they volunteered, a second CP-SAT solve keeps the reference plan's number of physicians and
+each hospital within `voluntary.coverage_tolerance` (15%) of its deficit reduction, and
+maximizes the deficit covered by voluntary offers before the usual stages. Its stages are
+reported as `voluntary`, `voluntary:deficit`, …. Without volunteers the result is
+unchanged. Rankings per short hospital and an estimated cost (paid offer minutes ×
+`cost.hourly_rate`) are part of the result. See
+[voluntary-availability.md](voluntary-availability.md).
+
 **Verification.** The chosen plan is re-scored with the Phase 3 coverage engine. The
 response notes whether it matches the CP-SAT objective, and the coverage-engine figures
 are the ones reported.

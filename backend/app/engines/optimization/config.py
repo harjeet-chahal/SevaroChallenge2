@@ -146,6 +146,41 @@ class StaffingPolicy(BaseModel):
     """Missing opt-in, rest, hours or schedule data fails the rule (never passes silently)."""
 
 
+class VoluntaryPolicy(BaseModel):
+    """How a physician's voluntary availability (submitted from the off-shift portal) affects
+    split-shift recommendations. It is a preference, never a rule: only offers that already
+    pass every split-shift rule (opt-in, credentials, rest, hours, overlap, length, offer
+    limits, declines) can benefit from it, and it never assigns anyone a shift."""
+
+    enabled: bool = True
+    coverage_tolerance: float = Field(default=0.15, ge=0, le=0.5)
+    """CHOICE: an offer that lies inside a physician's volunteered window is preferred over
+    the plan without voluntary availability, as long as each affected hospital keeps at least
+    (1 - tolerance) of the deficit reduction that plan achieves and the same number of
+    physicians is contacted. Rationale: an unsolicited offer can be declined or expire after
+    10 minutes (and uses one of the physician's 3 weekly offers); a volunteer has already said
+    yes to that time, so a small coverage difference buys a much more certain answer. 0 =
+    voluntary availability only breaks exact ties."""
+    fit_offers_to_window: bool = True
+    """CHOICE: also generate offer options that start and end inside each volunteered
+    window (every option is still re-checked against every rule)."""
+
+
+class CostPolicy(BaseModel):
+    """Estimated staffing cost of a split-shift offer. The optimizer's existing cost measure
+    is paid offer time (the ``offered_minutes`` stage) plus excess coverage; this turns paid
+    offer time into an amount so plans can be compared. The same rate applies to every
+    physician: volunteering never makes a physician cheaper."""
+
+    hourly_rate: float = Field(default=200.0, ge=0)
+    """ASSUMPTION: illustrative split-shift rate. The dataset has no pay data, so this is not
+    Sevaro's pay scale; override it with OPTIMIZATION_POLICY_FILE."""
+    currency: str = "USD"
+    paid_includes_time_to_online: bool = True
+    """BRIEF: the time to come online counts against what the offer is worth, so the whole
+    offer (including logging in) is paid while only the time after it covers the gap."""
+
+
 class SolverLimits(BaseModel):
     staffing_time_limit_seconds: float = 3.0
     staffing_deterministic_time: float = 5.0
@@ -161,6 +196,8 @@ class OptimizationConfig(BaseModel):
     weights: DispatchWeights = Field(default_factory=DispatchWeights)
     trap: TrapPolicy = Field(default_factory=TrapPolicy)
     staffing: StaffingPolicy = Field(default_factory=StaffingPolicy)
+    voluntary: VoluntaryPolicy = Field(default_factory=VoluntaryPolicy)
+    cost: CostPolicy = Field(default_factory=CostPolicy)
     solver: SolverLimits = Field(default_factory=SolverLimits)
     policy_version: str = "phase4-v1"
 

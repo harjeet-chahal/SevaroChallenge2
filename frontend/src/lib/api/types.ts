@@ -817,6 +817,106 @@ export interface DispatchResult {
   explanations: string[];
 }
 
+/** How voluntary availability affected a physician (a preference, never a rule). */
+export type VoluntaryStatus =
+  | "applied"
+  | "not_eligible"
+  | "no_shortage_overlap"
+  | "no_offer_fits"
+  | "outside_tolerance"
+  | "not_needed"
+  | "disabled";
+
+export interface VoluntaryMatch {
+  availability_id: string;
+  start_at: IsoDateTime;
+  end_at: IsoDateTime;
+  overlaps_shortage: boolean;
+  overlap_minutes: number;
+  shortage_start: IsoDateTime | null;
+  shortage_end: IsoDateTime | null;
+  offer_within_window: boolean;
+  status: VoluntaryStatus;
+  message: string;
+}
+
+/** Paid offer minutes × hourly rate. "simulated" = projected if accepted. */
+export interface CostEstimate {
+  basis: "simulated" | "confirmed";
+  paid_minutes: number;
+  hourly_rate: number;
+  currency: string;
+  amount: number;
+  covered_physician_minutes: number;
+  cost_per_covered_hour: number | null;
+  note: string;
+}
+
+export interface CostComparison {
+  label: string;
+  physician_names: string[];
+  cost: CostEstimate;
+  deficit_after: number | null;
+  /** Alternative − recommended (negative: the recommendation costs more). */
+  saving: number;
+  basis: "simulated" | "confirmed";
+  explanation: string;
+}
+
+export interface PlanCost {
+  recommended: CostEstimate;
+  comparisons: CostComparison[];
+  label: string;
+  assumptions: string[];
+}
+
+export interface RankedOffer {
+  start_at: IsoDateTime;
+  end_at: IsoDateTime;
+  minutes: number;
+  online_at: IsoDateTime;
+  hospital_ids: string[];
+}
+
+export interface RankedCandidate {
+  rank: number | null;
+  rank_without_voluntary: number | null;
+  /** Positive = moved up because of voluntary availability. */
+  movement: number;
+  physician_id: string;
+  display_name: string;
+  eligible: boolean;
+  in_plan: boolean;
+  voluntary: VoluntaryMatch | null;
+  voluntary_preference_applied: boolean;
+  offer: RankedOffer | null;
+  coverage_physician_minutes: number;
+  coverage_share_of_best: number | null;
+  minutes_to_come_online: number | null;
+  hours_worked_trailing_7d: number | null;
+  remaining_weekly_hours: number | null;
+  cost: CostEstimate | null;
+  summary: string;
+  reasons: string[];
+}
+
+export interface NeedRanking {
+  hospital_ids: string[];
+  hospital_names: string[];
+  shortage_start: IsoDateTime | null;
+  shortage_end: IsoDateTime | null;
+  entries: RankedCandidate[];
+  method: string[];
+}
+
+export interface VoluntarySummary {
+  active_windows: number;
+  applied: boolean;
+  coverage_tolerance: number;
+  reference_physicians: string[];
+  explanation: string[];
+}
+
 export interface CandidateEligibility {
   physician_id: string;
   display_name: string;
@@ -835,6 +935,7 @@ export interface CandidateEligibility {
   proposed_minutes: number | null;
   missing_data: string[];
   summary: string;
+  voluntary: VoluntaryMatch | null;
 }
 
 export interface HospitalEffect {
@@ -872,6 +973,8 @@ export interface ShiftRecommendation {
   explanation: string[];
   status: "proposed";
   requires_approval: true;
+  voluntary: VoluntaryMatch | null;
+  cost: CostEstimate | null;
 }
 
 export interface TrapRoutingOutcome {
@@ -923,6 +1026,9 @@ export interface StaffingResult {
   rules: string[];
   assumptions: string[];
   explanations: string[];
+  rankings: NeedRanking[];
+  voluntary: VoluntarySummary | null;
+  cost: PlanCost | null;
 }
 
 export interface SplitShiftAction {
@@ -1070,6 +1176,8 @@ export interface InterventionRecommendation {
   uncertainty: string[];
   restrictions: string[];
   approver_role: "clinical_lead" | "coordinator";
+  ranking: NeedRanking | null;
+  cost: PlanCost | null;
 }
 
 export interface OfferPlanItem {
@@ -1092,6 +1200,8 @@ export interface OfferPlanItem {
   eligible: boolean;
   checks: RuleCheck[];
   projected_effects: HospitalEffect[];
+  voluntary: VoluntaryMatch | null;
+  cost: CostEstimate | null;
 }
 
 export interface HospitalImpact {
@@ -1217,6 +1327,8 @@ export interface Intervention {
   offers: ShiftOffer[];
   allowed_actions: InterventionAction[];
   is_terminal: boolean;
+  confirmed_cost: CostEstimate | null;
+  confirmed_savings: CostComparison[];
 }
 
 export interface InterventionPage {
@@ -1328,4 +1440,43 @@ export interface ExpireResult {
   expired_offer_ids: string[];
   activated_offer_ids: string[];
   completed_offer_ids: string[];
+}
+
+/** An off-shift physician's "I'm available" window. Never a shift assignment. */
+export type AvailabilityStatus = "active" | "withdrawn";
+
+export interface VolunteerAvailability {
+  id: string;
+  physician_id: string;
+  display_name: string;
+  status: AvailabilityStatus;
+  start_at: IsoDateTime;
+  end_at: IsoDateTime;
+  duration_minutes: number;
+  timezone: string;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
+  withdrawn_at: IsoDateTime | null;
+  version: number;
+  phase: "upcoming" | "current" | "past" | "withdrawn";
+  can_update: boolean;
+  can_withdraw: boolean;
+  message: string;
+}
+
+export interface PhysicianAvailabilityPage {
+  physician_id: string;
+  display_name: string;
+  timezone: string;
+  simulation_time: IsoDateTime;
+  opted_in: boolean | null;
+  min_useful_window_minutes: number;
+  max_window_minutes: number;
+  items: VolunteerAvailability[];
+  notes: string[];
+}
+
+export interface AvailabilityPage {
+  total: number;
+  items: VolunteerAvailability[];
 }

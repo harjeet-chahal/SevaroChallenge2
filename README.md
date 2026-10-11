@@ -52,6 +52,7 @@ docs/
   optimization.md          dispatch (min-cost flow), split shifts (CP-SAT), trap, what-if
   dataset-import-plan.md   ZIP/CSV import: mapping, validation, atomic replacement
   workflow.md              Phase 5: state machine, approvals, offers, conflicts, activation
+  voluntary-availability.md  "I'm Available": persistence, ranking preference, cost model
 ```
 
 ## Prerequisites
@@ -94,6 +95,20 @@ cd frontend && npx tsc --noEmit && npm run lint && npm run build
 ```
 
 ## Demo
+
+Voluntary availability (load **workflow sample**; details in
+[docs/voluntary-availability.md](docs/voluntary-availability.md)):
+
+1. **Coordinator**: select *Ridge Sample Clinic: coverage gap now*. *Who to ask first*
+   ranks Dr. Vale Surge #1 and Dr. Yara Surge #2.
+2. **Physician**, signed in as Dr. Yara Surge: **I'm Available** → **Next 4 h** →
+   **Share availability**. The phone says she has not been assigned a shift.
+3. **Coordinator** (refreshes live): Yara is #1 with **Voluntarily Available** and
+   *Up from #2*. Her coverage is within 15% of Vale's, and she has already said yes.
+4. **Propose split shift**: Yara is the proposed physician. The drawer shows why she moved
+   up and the cost (same $800 as Vale, $400 less than the manual heuristic, all marked
+   *Simulated*). Submit for clinical-lead approval and continue as in Phase 5. Withdrawing
+   the availability puts Vale back first.
 
 Phase 5 (load **workflow sample**; details in [docs/workflow.md §12](docs/workflow.md#12-demo)):
 
@@ -175,6 +190,14 @@ curl -X POST localhost:8000/api/interventions/INT-0001/send-offers -H 'X-Demo-Ro
 curl localhost:8000/api/offers/mine -H 'X-Demo-Role: physician' -H 'X-Demo-Actor-Id: SRG-P6'
 curl -X POST localhost:8000/api/offers/OFF-0001/respond -H 'X-Demo-Role: physician' -H 'X-Demo-Actor-Id: SRG-P6' -H 'content-type: application/json' -d '{"response":"accept"}'
 curl localhost:8000/api/interventions/INT-0001/audit -H 'X-Demo-Role: coordinator'
+```
+
+Voluntary availability API (see [docs/voluntary-availability.md](docs/voluntary-availability.md)):
+
+```bash
+curl -X POST localhost:8000/api/availability -H 'X-Demo-Role: physician' -H 'X-Demo-Actor-Id: SRG-P8' -H 'content-type: application/json' -d '{"start_at":"2030-09-10T17:35:00-05:00","end_at":"2030-09-10T21:35:00-05:00"}'
+curl localhost:8000/api/availability -H 'X-Demo-Role: coordinator'
+curl -X POST localhost:8000/api/availability/AV-0001/withdraw -H 'X-Demo-Role: physician' -H 'X-Demo-Actor-Id: SRG-P8'
 ```
 
 The judging event CSV appends to the loaded day without replacing it or any workflow

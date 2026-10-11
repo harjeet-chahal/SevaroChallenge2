@@ -21,6 +21,13 @@ Objectives, solved in order, each stage fixing the previous optimum (implementat
 
 Only options that already passed every eligibility rule exist, so no stage can trade a
 safety rule for coverage.
+
+Voluntary availability (``VoluntaryConstraint``): after the plan above (the *reference*),
+a second solve keeps the reference's number of physicians and keeps each hospital's
+deficit within a tolerance of the reference, then:
+  1. maximizes the deficit physician-seconds covered by voluntary options (offers inside a
+     window the physician volunteered), then the usual stages from deficit onwards.
+The reference is itself feasible, so this solve is always feasible when the reference is.
 """
 
 from __future__ import annotations
@@ -32,6 +39,19 @@ from app.engines.optimization.solvers import load_cp_model
 from app.engines.optimization.split_shift.candidates import Option, PlanningContext
 
 STAGES = ("deficit", "physicians", "excess", "offered_minutes", "lateness", "tie_break")
+VOLUNTARY_STAGES = ("voluntary", "deficit", "excess", "offered_minutes", "lateness", "tie_break")
+
+
+@dataclass(frozen=True)
+class VoluntaryConstraint:
+    """Re-solve around a reference plan so volunteers can replace, never add or drop."""
+
+    option_indices: frozenset[int]
+    """Options whose whole offer lies inside the physician's volunteered window."""
+    physicians: int
+    """Exactly as many physicians as the reference plan contacts."""
+    max_deficit_seconds: dict[str, int]
+    """Per hospital: the reference deficit plus the allowed tolerance (physician-seconds)."""
 
 
 @dataclass
@@ -78,7 +98,9 @@ def _rank(options: list[Option]) -> dict[int, int]:
     return {o.index: i for i, o in enumerate(ordered)}
 
 
-def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution | None:
+def solve_cpsat(
+    ctx: PlanningContext, options: list[Option], voluntary: VoluntaryConstraint | None = None
+) -> StaffingSolution | None:
     cp_model = load_cp_model()
     if cp_model is None:
         return None
@@ -109,7 +131,8 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
                 vars_.append(v)
             m.add(sum(vars_) == x[o.index])
 
-    deficit_terms, excess_terms, required_terms = [], [], []
+    deficit_terms, excess_terms, required_terms, voluntary_terms = [], [], [], []
+    by_hospital: dict[str, list] = {}
     gap_hospitals = set(ctx.gap_hospitals)
     for k, piece in enumerate(pieces):
         y = sum(z[(i, piece.hospital_id)] for i in piece.covering)
@@ -120,8 +143,22 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
         else:
             m.add(d == piece.base_deficit)
         deficit_terms.append(piece.seconds * d)
+        by_hospital.setdefault(piece.hospital_id, []).append(piece.seconds * d)
         if piece.hospital_id in gap_hospitals:
             required_terms.append(piece.seconds * d)
+        if voluntary is not None and piece.base_deficit > 0:
+            mine = [i for i in piece.covering if i in voluntary.option_indices]
+            if mine:
+                # Deficit covered by volunteers here: at most the deficit, at most their count.
+                v = m.new_int_var(0, piece.base_deficit, f"v_{k}")
+                m.add(v <= sum(z[(i, piece.hospital_id)] for i in mine))
+                voluntary_terms.append(piece.seconds * v)
+    if voluntary is not None:
+        if x:
+            m.add(sum(x.values()) == voluntary.physicians)
+        for hid, limit in voluntary.max_deficit_seconds.items():
+            if by_hospital.get(hid):
+                m.add(sum(by_hospital[hid]) <= limit)
     deficit_expr = sum(deficit_terms) if deficit_terms else 0
     if st.require_full_coverage and required_terms:
         # Only the hospitals short within the look-ahead must be fully covered; later gaps
@@ -130,6 +167,7 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
 
     rank = _rank(options)
     objectives = {
+        "voluntary": -sum(voluntary_terms) if voluntary_terms else 0,
         "deficit": deficit_expr,
         "physicians": sum(x.values()) if x else 0,
         "excess": sum(excess_terms) if excess_terms else 0,
@@ -145,9 +183,10 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
     solver = cp_model.CpSolver()
     solver.parameters.num_workers = limits.num_workers
     solver.parameters.random_seed = limits.random_seed
-    per_stage = limits.staffing_time_limit_seconds / len(STAGES)
+    stage_names = VOLUNTARY_STAGES if voluntary is not None else STAGES
+    per_stage = limits.staffing_time_limit_seconds / len(stage_names)
     solver.parameters.max_time_in_seconds = per_stage
-    solver.parameters.max_deterministic_time = limits.staffing_deterministic_time / len(STAGES)
+    solver.parameters.max_deterministic_time = limits.staffing_deterministic_time / len(stage_names)
 
     stages: list[dict] = []
     status_name = "OPTIMAL"
@@ -155,7 +194,7 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
     best_bound = None
     deficit_value = None
     values: dict[int, int] | None = None
-    for name in STAGES:
+    for name in stage_names:
         expr = objectives[name]
         m.minimize(expr)
         if values is not None:
@@ -186,7 +225,7 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
             stages.append(record)
             continue
         stages.append(record)
-        if name == "deficit":
+        if name == stage_names[0]:
             status_name = stage_status if stage_status != "UNKNOWN" else "UNKNOWN"
             proven = False
             values = None
@@ -203,6 +242,12 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
         else:
             assigned[o.index] = tuple(h for h in o.hospitals if solver.value(z[(o.index, h)]))
     notes = [f"{len(options)} eligible offer options, {len(pieces)} hospital-time pieces."]
+    if voluntary is not None:
+        notes = [
+            f"Voluntary re-solve: {len(voluntary.option_indices)} offer option(s) inside a "
+            f"volunteered window; {voluntary.physicians} physician(s), each hospital's deficit "
+            "within the tolerance of the reference plan."
+        ]
     if status_name == "INFEASIBLE" and st.require_full_coverage:
         notes.append(
             "Full coverage was required and no combination of eligible offers achieves it."
@@ -261,4 +306,71 @@ def solve_greedy(ctx: PlanningContext, options: list[Option]) -> StaffingSolutio
         solver="fallback_greedy",
         fallback_used=True,
         notes=["OR-Tools CP-SAT unavailable: greedy heuristic used. Eligibility still enforced."],
+    )
+
+
+def solve_greedy_voluntary(
+    ctx: PlanningContext,
+    options: list[Option],
+    reference: StaffingSolution,
+    voluntary: VoluntaryConstraint,
+) -> StaffingSolution:
+    """Labelled fallback for the voluntary re-solve (no OR-Tools): swap reference offers for
+    voluntary ones one at a time, keeping every hospital within its deficit limit, while the
+    deficit covered by volunteers grows. Never adds or drops a physician."""
+    started = time.perf_counter()
+    pieces = build_pieces(ctx, options)
+
+    def per_hospital(selected: list[Option]) -> dict[str, int]:
+        ids = {o.index for o in selected}
+        out: dict[str, int] = {}
+        for p in pieces:
+            left = max(0, p.base_deficit - sum(i in ids for i in p.covering))
+            out[p.hospital_id] = out.get(p.hospital_id, 0) + p.seconds * left
+        return out
+
+    def volunteer_cover(selected: list[Option]) -> int:
+        ids = {o.index for o in selected if o.index in voluntary.option_indices}
+        return sum(
+            p.seconds * min(p.base_deficit, sum(i in ids for i in p.covering)) for p in pieces
+        )
+
+    chosen = list(reference.chosen)
+    while True:
+        best = None
+        for i, old in enumerate(chosen):
+            if old.index in voluntary.option_indices:
+                continue
+            others = {c.physician_id for j, c in enumerate(chosen) if j != i}
+            for o in options:
+                if o.index not in voluntary.option_indices or o.physician_id in others:
+                    continue
+                trial = [*chosen[:i], o, *chosen[i + 1 :]]
+                deficits = per_hospital(trial)
+                if any(
+                    deficits.get(h, 0) > lim for h, lim in voluntary.max_deficit_seconds.items()
+                ):
+                    continue
+                key = (
+                    -volunteer_cover(trial),
+                    sum(deficits.values()),
+                    o.minutes,
+                    o.start,
+                    o.physician_id,
+                )
+                if best is None or key < best[0]:
+                    best = (key, trial)
+        if best is None or volunteer_cover(best[1]) <= volunteer_cover(chosen):
+            break
+        chosen = best[1]
+    return StaffingSolution(
+        chosen=chosen,
+        assigned_hospitals={o.index: o.hospitals for o in chosen},
+        status="FALLBACK",
+        proven_optimal=False,
+        wall_time_ms=round((time.perf_counter() - started) * 1000, 3),
+        deficit_seconds=sum(per_hospital(chosen).values()),
+        solver="fallback_greedy",
+        fallback_used=True,
+        notes=["Voluntary preference applied by greedy swaps (OR-Tools unavailable)."],
     )

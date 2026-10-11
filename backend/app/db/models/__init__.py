@@ -1,5 +1,6 @@
 """ORM models. Importing this package registers every table on ``Base.metadata``."""
 
+from app.db.models.availability import AvailabilityRecord
 from app.db.models.event import EventLogEntry, EventRejectionRecord
 from app.db.models.reference import (
     BaselineVolumeRecord,
@@ -22,6 +23,7 @@ __all__ = [
     "AppMeta",
     "ApprovalRecord",
     "AuditLogEntry",
+    "AvailabilityRecord",
     "BaselineVolumeRecord",
     "CoverageRequirementRecord",
     "DatasetImport",
