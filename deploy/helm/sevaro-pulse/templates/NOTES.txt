@@ -1,0 +1,33 @@
+Sevaro Pulse {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{- if .Values.ingress.enabled }}
+
+Open the app:
+{{- if .Values.ingress.host }}
+  {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+  The Ingress accepts any host name. Find its address with:
+    kubectl -n {{ .Release.Namespace }} get ingress {{ include "sevaro-pulse.fullname" . }}
+{{- end }}
+{{- else }}
+
+The Ingress is disabled. Reach the app locally with two port-forwards:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sevaro-pulse.frontend.fullname" . }} 3000:{{ .Values.frontend.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sevaro-pulse.backend.fullname" . }} 8000:{{ .Values.backend.service.port }}
+Note: the UI calls /api on its own origin, so without an Ingress (or another proxy in front)
+only the API docs at http://localhost:8000/docs are fully usable.
+{{- end }}
+
+Check it:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if not .Values.backend.database.external.enabled }}
+
+Database: SQLite on {{ if .Values.backend.persistence.enabled }}PVC "{{ include "sevaro-pulse.backend.pvcName" . }}"{{ else }}an emptyDir (NOT persistent){{ end }}.
+The backend runs exactly one pod and restarts with the Recreate strategy, so upgrades
+cause a short API outage.
+{{- if and .Values.backend.persistence.enabled .Values.backend.persistence.retain (not .Values.backend.persistence.existingClaim) }}
+The PVC is kept on `helm uninstall`; delete it by hand to drop the data.
+{{- end }}
+{{- end }}

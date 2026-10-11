@@ -1,0 +1,40 @@
+# Example overrides: ingress-nginx + cert-manager (Let's Encrypt), images from a registry.
+#
+#   deploy/helm/helm.sh install -f deploy/helm/sevaro-pulse/values-nginx.example.yaml
+#
+# Copy this file and replace the placeholders; the chart does not use it by default.
+
+backend:
+  image:
+    repository: registry.example.com/sevaro-pulse/backend
+    tag: "REPLACE_WITH_GIT_SHA"
+  persistence:
+    size: 10Gi
+
+frontend:
+  image:
+    repository: registry.example.com/sevaro-pulse/frontend
+    tag: "REPLACE_WITH_GIT_SHA"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+
+ingress:
+  className: nginx
+  host: pulse.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Dataset uploads are capped at 50 MiB by the backend (backend.config.maxUploadBytes).
+    nginx.ingress.kubernetes.io/proxy-body-size: "55m"
+    # SSE on /api/live ends after 20s and reconnects; 60s leaves headroom.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # The security headers Caddy adds (deploy/Caddyfile) belong in the controller-wide
+    # add-headers ConfigMap; snippet annotations are off by default in ingress-nginx >= 1.9.
+  tls:
+    enabled: true
+    secretName: sevaro-pulse-tls
+
+networkPolicy:
+  enabled: true

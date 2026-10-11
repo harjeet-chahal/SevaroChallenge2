@@ -1,0 +1,12 @@
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+*~
+.idea/
+.vscode/
+# Example overrides are documentation, not part of the packaged chart.
+values-*.example.yaml
+README.md

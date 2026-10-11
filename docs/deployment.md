@@ -29,6 +29,7 @@ browser ─:80/:443─▶ caddy ─┬─ /api/*, /docs, /openapi.json ─▶ ba
 | `.env.example` | compose settings (site address, ports, image names) |
 | `deploy/aws/cloudformation.yml` | ECR repositories, EC2 host, Elastic IP, security group, IAM role |
 | `deploy/aws/deploy.sh` | provision, build and push, roll out over SSM, status, logs, destroy |
+| `deploy/helm/` | Kubernetes Helm chart and `helm.sh`; future scope, not deployed ([README](../deploy/helm/README.md)) |
 
 ## Run with Docker locally
 
@@ -184,3 +185,7 @@ would need:
 
 The images are ready for that already. They are stateless apart from `/app/data`, take
 their configuration from environment variables and expose HTTP health checks.
+
+A Helm chart for Kubernetes is ready in [`deploy/helm/`](../deploy/helm/README.md) as
+future scope. It keeps the single-backend-pod rule until step 1 is done, and its Ingress
+replaces Caddy the same way the ALB would in step 3.

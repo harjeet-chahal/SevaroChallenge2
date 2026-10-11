@@ -1,0 +1,116 @@
+{{- $fe := .Values.frontend }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sevaro-pulse.frontend.fullname" . }}
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  {{- if not $fe.autoscaling.enabled }}
+  replicas: {{ $fe.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $fe.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 8 }}
+        {{- with $fe.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "sevaro-pulse.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $fe.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $fe.podSecurityContext | nindent 8 }}
+      containers:
+        - name: frontend
+          image: {{ include "sevaro-pulse.image" (dict "image" $fe.image "ctx" .) }}
+          imagePullPolicy: {{ $fe.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $fe.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            {{- with $fe.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $fe.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $fe.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $fe.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $fe.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $fe.resources | nindent 12 }}
+          volumeMounts:
+            # Next.js writes its image/fetch cache here; the root filesystem is read-only.
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
+            {{- with $fe.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- with $fe.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $fe.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        {{- if $fe.affinity }}
+        {{- toYaml $fe.affinity | nindent 8 }}
+        {{- else }}
+        # Prefer spreading replicas across nodes so one node loss keeps the UI up.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 20 }}
+        {{- end }}
+      {{- with $fe.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

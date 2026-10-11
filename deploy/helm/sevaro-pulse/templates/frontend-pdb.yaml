@@ -1,0 +1,16 @@
+{{- $fe := .Values.frontend }}
+{{- $replicas := int (ternary $fe.autoscaling.minReplicas $fe.replicaCount $fe.autoscaling.enabled) }}
+{{- /* A PDB on a single replica would block node drains forever. */}}
+{{- if and $fe.podDisruptionBudget.enabled (gt $replicas 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sevaro-pulse.frontend.fullname" . }}
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  minAvailable: {{ $fe.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+{{- end }}

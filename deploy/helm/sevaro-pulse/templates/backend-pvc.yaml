@@ -1,0 +1,32 @@
+{{- $p := .Values.backend.persistence }}
+{{- if and (include "sevaro-pulse.backend.sqlite" .) $p.enabled (not $p.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sevaro-pulse.backend.pvcName" . }}
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  {{- if or $p.retain $p.annotations }}
+  annotations:
+    {{- if $p.retain }}
+    # Keep the database when the release is uninstalled; delete the PVC by hand to drop it.
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- with $p.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml $p.accessModes | nindent 4 }}
+  {{- if $p.storageClass }}
+  {{- if eq "-" $p.storageClass }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ $p.storageClass | quote }}
+  {{- end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $p.size | quote }}
+{{- end }}

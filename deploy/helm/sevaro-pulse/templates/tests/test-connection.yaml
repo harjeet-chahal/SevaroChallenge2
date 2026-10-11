@@ -1,0 +1,51 @@
+{{- /* `helm test <release>`: the backend is healthy and the UI answers, inside the cluster. */}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sevaro-pulse.fullname" . }}-test
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    # Reuses the backend image (already on the node) for its Python, instead of pulling curl.
+    - name: smoke
+      image: {{ include "sevaro-pulse.image" (dict "image" .Values.backend.image "ctx" .) }}
+      imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: BACKEND_URL
+          value: "http://{{ include "sevaro-pulse.backend.fullname" . }}:{{ .Values.backend.service.port }}/api/health"
+        - name: FRONTEND_URL
+          value: "http://{{ include "sevaro-pulse.frontend.fullname" . }}:{{ .Values.frontend.service.port }}/"
+      command:
+        - python
+        - -c
+        - |
+          import json, os, sys, urllib.request
+          for name in ("BACKEND_URL", "FRONTEND_URL"):
+              url = os.environ[name]
+              with urllib.request.urlopen(url, timeout=10) as r:
+                  body = r.read()
+                  print(name, url, r.status)
+                  if r.status != 200:
+                      sys.exit(1)
+                  if name == "BACKEND_URL":
+                      print(json.loads(body))

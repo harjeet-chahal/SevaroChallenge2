@@ -1,0 +1,23 @@
+{{- $as := .Values.frontend.autoscaling }}
+{{- if $as.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "sevaro-pulse.frontend.fullname" . }}
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "sevaro-pulse.frontend.fullname" . }}
+  minReplicas: {{ $as.minReplicas }}
+  maxReplicas: {{ $as.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetCPUUtilizationPercentage }}
+{{- end }}

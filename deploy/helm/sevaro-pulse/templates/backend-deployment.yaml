@@ -1,0 +1,143 @@
+{{- include "sevaro-pulse.validate" . }}
+{{- $be := .Values.backend }}
+{{- $sqlite := include "sevaro-pulse.backend.sqlite" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sevaro-pulse.backend.fullname" . }}
+  labels:
+    {{- include "sevaro-pulse.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ $be.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    {{- if $sqlite }}
+    # The old pod must release the SQLite file (and the RWO volume) before the new one starts.
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      {{- $dbChecksum := and $be.database.external.enabled (not $be.database.external.existingSecret) }}
+      {{- if or $dbChecksum $be.podAnnotations }}
+      annotations:
+        {{- if $dbChecksum }}
+        # Roll the pod when the chart-managed DATABASE_URL changes.
+        checksum/db-secret: {{ include (print $.Template.BasePath "/backend-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with $be.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      labels:
+        {{- include "sevaro-pulse.selectorLabels" (dict "ctx" . "component" "backend") | nindent 8 }}
+        {{- with $be.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "sevaro-pulse.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $be.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $be.podSecurityContext | nindent 8 }}
+      containers:
+        - name: backend
+          image: {{ include "sevaro-pulse.image" (dict "image" $be.image "ctx" .) }}
+          imagePullPolicy: {{ $be.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $be.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: {{ $be.config.appEnv | quote }}
+            - name: CORS_ORIGINS
+              value: {{ $be.config.corsOrigins | quote }}
+            - name: SIMULATION_REFERENCE_TIME
+              value: {{ $be.config.simulationReferenceTime | quote }}
+            - name: MAX_UPLOAD_BYTES
+              value: {{ $be.config.maxUploadBytes | int64 | quote }}
+            - name: MAX_UNCOMPRESSED_BYTES
+              value: {{ $be.config.maxUncompressedBytes | int64 | quote }}
+            - name: MAX_ARCHIVE_ENTRIES
+              value: {{ $be.config.maxArchiveEntries | int64 | quote }}
+            {{- if $be.database.external.enabled }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sevaro-pulse.backend.dbSecretName" . }}
+                  key: {{ $be.database.external.existingSecretKey }}
+            {{- end }}
+            {{- with $be.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $be.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $be.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $be.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $be.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $be.resources | nindent 12 }}
+          volumeMounts:
+            {{- if $sqlite }}
+            # SQLite: dataset, event log, simulation clock, workflow and audit state.
+            - name: data
+              mountPath: /app/data
+            {{- end }}
+            # Upload spooling; the root filesystem is read-only.
+            - name: tmp
+              mountPath: /tmp
+            {{- with $be.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        {{- if $sqlite }}
+        - name: data
+          {{- if $be.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "sevaro-pulse.backend.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with $be.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $be.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $be.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $be.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

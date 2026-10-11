@@ -1,0 +1,259 @@
+# Sevaro Pulse Helm chart. Kubernetes counterpart of docker-compose.yml:
+#
+#   Ingress ─┬─ /api, /docs, /redoc, /openapi.json ─▶ backend  :8000 (FastAPI, 1 uvicorn worker)
+#            │                                          └─ PVC: SQLite in /app/data
+#            └─ everything else ─────────────────────▶ frontend :3000 (Next.js standalone)
+#
+# The Ingress replaces Caddy: the UI and the API share one origin, so the browser needs no
+# CORS and the frontend image works on any host name. See README.md next to this file.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Pull secrets for private registries (ECR, GHCR, ...), e.g. [{name: ecr-pull}].
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  # Defaults to the release fullname when empty.
+  name: ""
+  # e.g. eks.amazonaws.com/role-arn for IRSA.
+  annotations: {}
+  # Neither container talks to the Kubernetes API.
+  automountServiceAccountToken: false
+
+# ---------------------------------------------------------------------------------------------
+# Backend: FastAPI + SQLite (or an external database)
+# ---------------------------------------------------------------------------------------------
+backend:
+  image:
+    repository: sevaro-pulse/backend
+    # Defaults to .Chart.AppVersion when empty.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # Must stay 1 with SQLite: one writer, and the analysis caches and the /api/live SSE
+  # version stream are per process. The chart refuses more unless database.external is on.
+  replicaCount: 1
+
+  # Settings read by backend/app/core/config.py.
+  config:
+    appEnv: production
+    # Same origin behind the Ingress, so no cross-origin callers by default.
+    corsOrigins: ""
+    # Optional fixed simulation "now" with an explicit UTC offset, e.g. 2026-03-14T18:00:00+00:00.
+    simulationReferenceTime: ""
+    maxUploadBytes: 52428800
+    maxUncompressedBytes: 209715200
+    maxArchiveEntries: 200
+
+  database:
+    # Off (default): SQLite at /app/data/sevaro_pulse.db on the PVC below.
+    # On: DATABASE_URL comes from a Secret. This needs a driver in the image and migrations
+    # (see "Scaling beyond one host" in docs/deployment.md); only then raise replicaCount.
+    external:
+      enabled: false
+      # Use an existing Secret (recommended) ...
+      existingSecret: ""
+      existingSecretKey: DATABASE_URL
+      # ... or let the chart create one from this value (lands in Helm release history).
+      url: ""
+
+  persistence:
+    # Used only for SQLite. Disabling it keeps the database in an emptyDir that is lost
+    # whenever the pod is rescheduled; fine for a throwaway demo, nothing else.
+    enabled: true
+    existingClaim: ""
+    # Empty uses the cluster's default StorageClass.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+    annotations: {}
+    # Keep the PVC (and the database) when the release is uninstalled.
+    retain: true
+
+  service:
+    type: ClusterIP
+    port: 8000
+    annotations: {}
+
+  # Matches the Compose stop_grace_period; uvicorn itself drains in 10s.
+  terminationGracePeriodSeconds: 15
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      # The OR-Tools solver is bursty; leave CPU unlimited unless the cluster requires it.
+      memory: 1536Mi
+
+  # /api/health checks the database too, and returns 503 when it is unhealthy.
+  startupProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 4
+    failureThreshold: 24
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 4
+    failureThreshold: 3
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 4
+
+  # The image runs as user "app" (uid 10001); fsGroup makes the PVC writable for it.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Extra env vars, e.g. DATASET_MAPPING_FILE / RISK_RULES_FILE pointing at a mounted ConfigMap.
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# ---------------------------------------------------------------------------------------------
+# Frontend: Next.js standalone server (stateless, safe to scale)
+# ---------------------------------------------------------------------------------------------
+frontend:
+  image:
+    repository: sevaro-pulse/frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # NEXT_PUBLIC_* settings are baked in at image build time, not set here. Build with an
+  # empty NEXT_PUBLIC_API_BASE_URL (the default) so the UI calls /api on its own origin.
+  replicaCount: 2
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+  terminationGracePeriodSeconds: 15
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
+
+  startupProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 4
+    failureThreshold: 24
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 4
+    failureThreshold: 3
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # The image runs as user "node" (uid 1000).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# ---------------------------------------------------------------------------------------------
+# Ingress: path routing that replaces deploy/Caddyfile
+# ---------------------------------------------------------------------------------------------
+ingress:
+  enabled: true
+  # e.g. nginx, alb, traefik. Empty uses the cluster default IngressClass.
+  className: ""
+  # Controller-specific settings; see values-*.example.yaml. The backend already sends
+  # "X-Accel-Buffering: no" on /api/live, so ingress-nginx streams SSE without extra config.
+  annotations: {}
+  # Empty host = any host name (like Caddy's ":80").
+  host: ""
+  # Prefix paths routed to the backend; everything else goes to the frontend.
+  backendPaths:
+    - /api
+    - /docs
+    - /redoc
+    - /openapi.json
+  tls:
+    enabled: false
+    # Secret holding the certificate. cert-manager can create it via annotations.
+    secretName: ""
+
+# ---------------------------------------------------------------------------------------------
+# NetworkPolicy: only the ingress controller reaches the pods (needs a CNI that enforces it)
+# ---------------------------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # Namespace of the ingress controller.
+  ingressControllerNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+  # Narrow further to the controller pods, e.g. {matchLabels: {app.kubernetes.io/name: ingress-nginx}}.
+  ingressControllerPodSelector: {}

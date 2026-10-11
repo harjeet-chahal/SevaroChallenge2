@@ -1,0 +1,16 @@
+apiVersion: v2
+name: sevaro-pulse
+description: Sevaro Pulse, the tele-neurology operations command center (FastAPI backend + Next.js UI)
+type: application
+# Chart version. Bump on any change to the chart itself.
+version: 0.1.0
+# Default image tag when backend.image.tag / frontend.image.tag are empty.
+appVersion: "latest"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - fastapi
+  - nextjs
+  - operations
+home: https://github.com/harjeet-chahal/SevaroChallenge2
+maintainers:
+  - name: Harjeet Singh Chahal

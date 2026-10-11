@@ -1,0 +1,45 @@
+# Example overrides: Amazon EKS with the AWS Load Balancer Controller (ALB), images from the
+# ECR repositories that deploy/aws/cloudformation.yml already creates, gp3 EBS storage.
+#
+#   deploy/helm/helm.sh install -f deploy/helm/sevaro-pulse/values-eks.example.yaml
+#
+# Copy this file and replace the placeholders; the chart does not use it by default.
+
+backend:
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/sevaro-pulse/backend
+    tag: "REPLACE_WITH_GIT_SHA"
+  service:
+    annotations:
+      # Per-service ALB target group health check (the frontend's default "/" is fine).
+      alb.ingress.kubernetes.io/healthcheck-path: /api/health
+  persistence:
+    # EBS is zonal and ReadWriteOnce, which suits the single SQLite pod.
+    storageClass: gp3
+    size: 10Gi
+  # Images are built for linux/arm64 by deploy/aws/deploy.sh when the host is Graviton;
+  # pin nodes to the matching architecture (or build multi-arch images).
+  nodeSelector:
+    kubernetes.io/arch: arm64
+
+frontend:
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/sevaro-pulse/frontend
+    tag: "REPLACE_WITH_GIT_SHA"
+  nodeSelector:
+    kubernetes.io/arch: arm64
+
+ingress:
+  className: alb
+  host: pulse.example.com
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/REPLACE
+    # Default 60s idle timeout already covers the 20s SSE streams on /api/live.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=60
+  # With ALB, TLS terminates on the ACM certificate above, not on a Kubernetes Secret.
+  tls:
+    enabled: false
