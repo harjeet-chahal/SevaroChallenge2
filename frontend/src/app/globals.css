@@ -282,6 +282,33 @@
         stroke-dashoffset: 0;
     }
 }
+@keyframes ng-rise {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes ng-blink {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.25;
+    }
+}
+@keyframes ng-fill {
+    from {
+        transform: scaleX(0);
+    }
+    to {
+        transform: scaleX(1);
+    }
+}
 @utility animate-ng-pulse {
     animation: ng-pulse 1.4s ease-in-out infinite;
 }
