@@ -1,5 +1,10 @@
 import { TagBadge } from "@/components/shared/status-badges";
-import type { InterventionStatus, InterventionType, OfferStatus } from "@/lib/api/types";
+import type {
+  Intervention,
+  InterventionStatus,
+  InterventionType,
+  OfferStatus,
+} from "@/lib/api/types";
 import {
   INTERVENTION_STATUS_LABELS,
   INTERVENTION_TYPE_LABELS,
@@ -45,4 +50,13 @@ export function OfferStatusBadge({ status }: { status: OfferStatus }) {
 
 export function InterventionTypeBadge({ type }: { type: InterventionType }) {
   return <TagBadge tone="neutral">{INTERVENTION_TYPE_LABELS[type]}</TagBadge>;
+}
+
+/** "Clinical escalation · Completed": what was done about a problem, and where it stands. */
+export function InterventionProgressBadge({ intervention: i }: { intervention: Intervention }) {
+  return (
+    <TagBadge tone={INTERVENTION_TONES[i.status]} title={`${i.id}: ${i.title}`}>
+      {INTERVENTION_TYPE_LABELS[i.type]} · {INTERVENTION_STATUS_LABELS[i.status]}
+    </TagBadge>
+  );
 }

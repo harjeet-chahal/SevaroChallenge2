@@ -117,12 +117,13 @@ def analysis_1820(inputs):
     return analyze(events, reference, NOW, load_risk_config(None))
 
 
-def _staffing(inputs, *, at: datetime = NOW, planning_minutes: int | None = None):
+def _staffing(inputs, *, at: datetime = NOW, lookahead_minutes: int | None = None):
+    """Default policy unless a shortage look-ahead is given (planning window unchanged)."""
     events, reference = inputs
     analysis = analyze(events, reference, at, load_risk_config(None))
     cfg = load_optimization_config(None)
-    if planning_minutes is not None:
-        staffing = cfg.staffing.model_copy(update={"planning_horizon_minutes": planning_minutes})
+    if lookahead_minutes is not None:
+        staffing = cfg.staffing.model_copy(update={"shortage_lookahead_minutes": lookahead_minutes})
         cfg = cfg.model_copy(update={"staffing": staffing})
     result, _ = run_staffing(analysis, cfg)
     return result
@@ -391,42 +392,68 @@ def test_capacity_meets_base_requirements_all_day_but_free_count_does_not(inputs
 # --- 4. Off-shift physicians -----------------------------------------------------------
 
 
-def test_every_off_shift_physician_passes_or_fails_the_expected_rules(official):
+def test_at_1820_no_hospital_is_short_within_90_minutes_so_nobody_is_called(official):
     client, _ = official
     staffing = client.get("/api/optimization/split-shifts").json()
-    assert staffing["gap_hospital_ids"] == ["SYN-001", "SYN-003", "SYN-008"]
-    rows = {c["physician_id"]: c for c in staffing["candidates"]}
+    assert staffing["gap_hospital_ids"] == []
+    assert staffing["recommendations"] == []
+    assert all("credentialed_at_gap" in c["failed_rules"] for c in staffing["candidates"])
+    later = next(e for e in staffing["explanations"] if "not acted on yet" in e)
+    # Northfield 20:00 EDT, Cedar Ridge 21:00 ET = 20:00 CDT, Redwood 21:00 ET = 18:00 PDT.
+    for text in (
+        "Northfield Medical from 20:00 EDT",
+        "Cedar Ridge Medical Center from 20:00 CDT",
+        "Redwood University Medical Center from 18:00 PDT",
+    ):
+        assert text in later
+    refused = client.post("/api/interventions", headers=COORD, json={"type": "split_shift"})
+    assert refused.status_code == 422
+    (reason,) = refused.json()["error"]["details"]["blocking_reasons"]
+    assert reason.startswith("No coverage gap at any hospital in the next 90 min")
+
+
+def test_at_1831_exactly_one_off_shift_physician_can_be_asked(inputs):
+    """At 18:31 Northfield's 20:00 gap (1 of 2 doctors) is inside the 90-minute look-ahead;
+    Cedar Ridge and Redwood (21:00) are not yet."""
+    result = _staffing(inputs, at=NOW + timedelta(minutes=11))
+    assert result.gap_hospital_ids == ["SYN-008"]
+    rows = {c.physician_id: c for c in result.candidates}
     expected = {
-        "PHY-009": set(),  # rested 11.3 h, 36 + offer <= 60, next shift 03-18 19:00
-        "PHY-010": set(),  # rested 22.3 h, 24 h, next shift 03-19 08:00
-        "PHY-011": {"no_overlap"},  # night shift at 19:00, 40 min away
-        "PHY-012": {"opt_in", "no_overlap"},  # opted out; night shift at 20:00
-        "PHY-013": {"opt_in", "credentialed_at_gap"},  # opted out; 005/009/010/011 not short
-        "PHY-014": {"weekly_hours"},  # 59 h + 2 h > 60 h
+        "PHY-009": set(),  # rested 11.5 h, 36 + offer <= 60, next shift 03-18 19:00
+        "PHY-010": {"credentialed_at_gap"},  # only 002/003/006/007
+        "PHY-011": {"no_overlap"},  # night shift at 19:00, 29 min away
+        "PHY-012": {"opt_in", "credentialed_at_gap", "no_overlap"},  # night shift at 20:00
+        "PHY-013": {"opt_in", "credentialed_at_gap"},
+        "PHY-014": {"credentialed_at_gap", "weekly_hours"},  # 59 h + 2 h > 60 h
     }
-    assert {pid: set(r["failed_rules"]) for pid, r in rows.items()} == expected
-    assert rows["PHY-009"]["gap_hospital_ids"] == ["SYN-008"]
-    assert rows["PHY-010"]["gap_hospital_ids"] == ["SYN-003"]
+    assert {pid: set(c.failed_rules) for pid, c in rows.items()} == expected
+    assert rows["PHY-009"].gap_hospital_ids == ["SYN-008"]
+    (rec,) = result.recommendations
+    assert (rec.physician_id, rec.hospital_ids) == ("PHY-009", ["SYN-008"])
+    # Covers Northfield's whole 20:00-22:00 gap: online by 20:00, offer runs past 22:00.
+    assert rec.online_at <= _et("20:00") and rec.offer_end >= _et("22:00")
     off = {r["physician_id"]: r for r in _rows("physicians_off_shift_roster.csv")}
     for pid, row in rows.items():
-        assert row["remaining_weekly_hours"] == 60 - float(off[pid]["hours_worked_last_7d"])
-        assert row["minutes_to_come_online"] == int(off[pid]["est_minutes_to_online"])
-        assert _iso(row["latest_valid_end"]) == _iso(off[pid]["next_shift_start"])
+        assert row.remaining_weekly_hours == 60 - float(off[pid]["hours_worked_last_7d"])
+        assert row.minutes_to_come_online == int(off[pid]["est_minutes_to_online"])
+        assert row.latest_valid_end == _iso(off[pid]["next_shift_start"])
 
 
 @pytest.mark.parametrize(
-    ("planning_minutes", "eligible"),
+    ("lookahead_minutes", "eligible"),
     [
         (90, set()),
-        (100, set()),  # the 20:00 Northfield gap starts exactly at the window end
+        (100, set()),  # the 20:00 Northfield gap starts exactly at the look-ahead end
         (101, {"PHY-009"}),
         (160, {"PHY-009"}),  # the 21:00 Cedar Ridge / Redwood gaps not reached yet
         (161, {"PHY-009", "PHY-010"}),
         (240, {"PHY-009", "PHY-010"}),
     ],
 )
-def test_eligible_set_at_1820_depends_on_the_look_ahead_window(inputs, planning_minutes, eligible):
-    result = _staffing(inputs, planning_minutes=planning_minutes)
+def test_eligible_set_at_1820_depends_only_on_the_shortage_look_ahead(
+    inputs, lookahead_minutes, eligible
+):
+    result = _staffing(inputs, lookahead_minutes=lookahead_minutes)
     assert {c.physician_id for c in result.candidates if c.eligible} == eligible
 
 
@@ -434,10 +461,10 @@ def test_eligible_set_at_1820_depends_on_the_look_ahead_window(inputs, planning_
     ("minutes_after", "eligible"),
     [(10, set()), (11, {"PHY-009"}), (70, {"PHY-009"}), (71, {"PHY-009", "PHY-010"})],
 )
-def test_with_a_90_minute_window_the_eligible_set_follows_the_clock(
+def test_with_the_default_90_minute_look_ahead_the_eligible_set_follows_the_clock(
     inputs, minutes_after, eligible
 ):
-    result = _staffing(inputs, at=NOW + timedelta(minutes=minutes_after), planning_minutes=90)
+    result = _staffing(inputs, at=NOW + timedelta(minutes=minutes_after))
     assert {c.physician_id for c in result.candidates if c.eligible} == eligible
 
 
@@ -473,7 +500,11 @@ JUDGE_CSV = (
 def test_judge_csv_appends_to_the_official_day_without_resetting_anything(client):
     files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
     assert upload(client, files).status_code == 200
-    proposed = client.post("/api/interventions", headers=COORD, json={"type": "split_shift"})
+    proposed = client.post(
+        "/api/interventions",
+        headers=COORD,
+        json={"type": "escalation", "alert_id": "STAGE_TRIAGED_UNASSIGNED:consult:CON-2105"},
+    )
     assert proposed.status_code == 201, proposed.text
     before = client.get("/api/simulation").json()
     import_id = client.get("/api/datasets/status").json()["active"]["import_id"]

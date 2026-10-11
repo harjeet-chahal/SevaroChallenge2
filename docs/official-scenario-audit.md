@@ -33,10 +33,9 @@ All times are Eastern (EDT, UTC−4) unless a zone is given. "Now" is 2026-03-17
    | 101–160 min | Northfield | **PHY-009 only** |
    | ≥ 161 min (the staffing default is 240) | Northfield, Cedar Ridge, Redwood | **PHY-009 and PHY-010** |
 
-   Split-shift eligibility uses the 240-minute staffing planning window
-   (`staffing.planning_horizon_minutes`, documented in [optimization.md](optimization.md)).
-   That window reaches Redwood's 21:00 gap, so PHY-010 passes. The dashboard's 90-minute
-   forecast shows no coverage gap at all at 18:20. The handbook's "exactly one" therefore
+   Before the decision below, split-shift eligibility used the 240-minute staffing
+   planning window, which reaches Redwood's 21:00 gap, so PHY-010 passed. The dashboard's
+   90-minute forecast showed no coverage gap at all at 18:20. The handbook's "exactly one"
    holds only for a look-ahead between 101 and 160 minutes, and the brief only says "at
    least 90 minutes".
 5. **Suncrest and Oak Valley have no capacity gap at any look-ahead.** Their 18:20 problem
@@ -48,7 +47,16 @@ All times are Eastern (EDT, UTC−4) unless a zone is given. "Now" is 2026-03-17
 
 **Conclusion.** The official data does not support "exactly one eligible off-shift
 physician at 18:20" under any single interpretation the text requires. No physician ID or
-expected outcome is hard-coded. The look-ahead is a policy decision (section 8).
+expected outcome is hard-coded.
+
+**Team decision (2026-10-10).** Look 90 minutes ahead, the brief's minimum and the
+dashboard's forecast window, to decide which hospitals are short; offers are still planned
+over 240 minutes so they are long enough. On the official data:
+
+- 18:20: nobody can be asked; the stranded stroke consults are escalated or reassigned.
+- 18:31–19:30: Dr. Grace Okafor (PHY-009) is the only physician who can be asked, for
+  Northfield's 20:00 gap.
+- From 19:31: Dr. Ben Alvarez (PHY-010) also qualifies, for Redwood's 21:00 gap.
 
 ## 1. Base dataset validation
 
@@ -176,11 +184,17 @@ is later. Hours are checked with the minimum 2-hour offer.
 | Offer limits (open / 7 days) | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Short hospitals credentialed, 90 min | none | none | none | none | none | none |
 | Short hospitals credentialed, 240 min | **008** | **003** | 001, 008 | 003 | none | 001 |
-| Engine result (240 min) | **eligible** | **eligible** | no_overlap | opt_in, no_overlap | opt_in, credentialed_at_gap | weekly_hours |
+| Old result (240 min) | **eligible** | **eligible** | no_overlap | opt_in, no_overlap | opt_in, credentialed_at_gap | weekly_hours |
+| Now, at 18:20 (90 min) | credentialed_at_gap | credentialed_at_gap | credentialed_at_gap, no_overlap | opt_in, credentialed_at_gap, no_overlap | opt_in, credentialed_at_gap | credentialed_at_gap, weekly_hours |
+| Now, at 18:31 (90 min, Northfield short) | **eligible** | credentialed_at_gap | no_overlap | opt_in, credentialed_at_gap, no_overlap | opt_in, credentialed_at_gap | credentialed_at_gap, weekly_hours |
+
+At 18:31 the recommendation is PHY-009, 19:45–22:45 for Northfield (online 20:00), which
+covers Northfield's whole 20:00–22:00 gap.
 
 `offers_declined_last_30d` (1, 0, 2, 0, 5, 0) is informational; the brief has no rule on it.
 
-**Why PHY-009 and PHY-010 both pass.** Each passes every rule at 18:20: opted in, rested
+**Why PHY-009 and PHY-010 both passed under the old 240-minute window.** Each passes every
+rule at 18:20 except, now, "credentialed at a short hospital": opted in, rested
 (11.3 h and 22.3 h), hours (38 h and 26 h with 2 h, 39 h and 27 h with the recommended
 3 h), no clash with a scheduled shift, ≥ 2 h useful after coming online, and no offers
 sent. Each is also credentialed at a hospital that is short in the 240-minute window:
@@ -200,17 +214,18 @@ and also credentialing because none of its hospitals is short under capacity.
 
 ## 5. Look-ahead sensitivity (engine)
 
-| Clock | Look-ahead | Eligible |
+| Clock | Shortage look-ahead | Eligible |
 | --- | --- | --- |
-| 18:20 | 90, 100 | none |
+| 18:20 | **90 (default)**, 100 | none |
 | 18:20 | 101 – 160 | PHY-009 |
 | 18:20 | 161, 240 | PHY-009, PHY-010 |
 | 18:30 | 90 | none |
 | 18:31 – 19:30 | 90 | PHY-009 |
 | 19:31 | 90 | PHY-009, PHY-010 |
 
-Change it with an optimization policy file
-(`OPTIMIZATION_POLICY_FILE` → `{"staffing": {"planning_horizon_minutes": N}}`).
+The default follows the dashboard forecast window. To override it, use an optimization
+policy file (`OPTIMIZATION_POLICY_FILE` → `{"staffing": {"shortage_lookahead_minutes": N}}`).
+The offer-planning window (`planning_horizon_minutes`, 240) is separate.
 
 ## 6. Judge CSV ingestion (official day)
 
@@ -221,7 +236,7 @@ were sent at 18:20: a new stroke consult at Suncrest, a repeat call for CON-2105
 | Requirement | Result |
 | --- | --- |
 | Appends to the active base dataset | same import ID; data version +1; base events untouched |
-| Preserves workflow state | a split-shift intervention proposed before the upload stays `pending_approval` |
+| Preserves workflow state | an escalation of CON-2105 proposed before the upload stays `pending_approval` |
 | Late records | applied at their event time (CON-2107 Note Pending from 18:22). A backfilled 18:15 record is visible at once (CON-2118 Documentation from 18:15) |
 | Duplicates | in-file repeat and resent base record reported as `duplicate`, stored, never applied twice |
 | Updates alerts, coverage and recommendations | after advancing to 18:30: Suncrest 6 arrivals (spike), ROUTING_FAILURE for CON-9001, staffing recomputed at the new data version |
@@ -237,20 +252,24 @@ were sent at 18:20: a new stroke consult at Suncrest, a repeat call for CON-2105
   request"). It was labelled `received_out_of_sequence`, which the consult panel displayed
   as a data-ordering error. Behaviour was already correct: no clock reset, no double
   demand.
-- No change to coverage, eligibility, time-zone or import logic. Nothing confirmed a bug
-  there.
+- Team decision on the look-ahead (section 5):
+  - `backend/app/engines/optimization/config.py`: new `shortage_lookahead_minutes`
+    (default = the dashboard forecast window).
+  - `backend/app/engines/optimization/split_shift/candidates.py`: a hospital is a
+    split-shift target only if its first gap starts within the look-ahead; later gaps are
+    kept for explanations.
+  - `split_shift/__init__.py`: explanations name the hospitals short now and list later
+    gaps as "not acted on yet".
+  - `backend/app/services/workflow.py`: refusal messages quote the look-ahead, and a
+    proposal with no short hospital gets one clear reason ("monitor or escalate").
+- No change to coverage, time-zone or import logic. Nothing confirmed a bug there.
 
 ## 8. Open specification questions
 
-1. **Look-ahead for "a hospital that is short"** (decides the eligible count; section 5).
-   The brief says "at least 90 minutes". The dashboard uses 90 and the staffing default is
-   240. Options:
-   - **240 (current).** Two eligible; PHY-010 is offered for Redwood's 21:00 gap.
-   - **120 (the minimum offer length).** Exactly PHY-009; reproduces the handbook. The
-     argument for it: decide now only the gaps that a minimum-length offer made now could
-     reach. Note this value was chosen knowing the answer it gives.
-   - **90 (same as Detect).** The dashboard and staffing agree. Nobody at 18:20; PHY-009
-     alone from 18:31.
+1. **Look-ahead for "a hospital that is short"** — *decided: 90 minutes* (see Summary).
+   The brief says "at least 90 minutes". The alternatives were 240 (two eligible at 18:20)
+   and 120 (exactly PHY-009 at 18:20, chosen knowing the answer). The consequence of 90:
+   at 18:20 no off-shift physician can be asked.
 2. **Meaning of "available"** in the coverage rule. Resolved by evidence (section 2), but
    not stated explicitly in the brief.
 3. **Surge projection.** The +1 ends when known arrivals leave the window (19:04:30 at

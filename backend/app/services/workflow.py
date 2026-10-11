@@ -704,8 +704,8 @@ class WorkflowService:
         if not gap_need:
             blocking.append(
                 f"No coverage gap at {', '.join(names.get(h, h) for h in need) or 'any hospital'} "
-                f"in the next {ctx.horizon_minutes} min (counting accepted shifts): a split shift "
-                "is not needed. Monitor, or escalate if the problem is not about staffing."
+                f"in the next {ctx.lookahead_minutes} min (counting accepted shifts): a split "
+                "shift is not needed. Monitor, or escalate if the problem is not about staffing."
             )
 
         if not requested:
@@ -724,7 +724,7 @@ class WorkflowService:
                     if c.eligibility.eligible and set(c.scope) & set(need)
                 ]
                 primary = eligible[0].physician_id if eligible else None
-            if primary is None:
+            if primary is None and gap_need:
                 reasons = [
                     f"{c.state.display_name}: {c.eligibility.summary}"
                     for c in internals.candidates
@@ -734,7 +734,7 @@ class WorkflowService:
                     "No off-shift physician can be asked under the rules — escalate instead of "
                     "bending a rule. " + " ".join(reasons)
                 )
-            else:
+            elif primary is not None:
                 requested = [primary]
         if len(requested) - 1 > self.policy.max_backup_offers:
             blocking.append(f"At most {self.policy.max_backup_offers} backup physicians.")
@@ -1389,7 +1389,7 @@ class WorkflowService:
                 lines,
                 [],
                 f"no coverage gap remains at {', '.join(names.get(h, h) for h in need)} in the "
-                f"next {ctx.horizon_minutes} min (counting accepted shifts).",
+                f"next {ctx.lookahead_minutes} min (counting accepted shifts).",
             )
         lines.append(
             f"Coverage need still present at "
