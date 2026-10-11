@@ -1,6 +1,6 @@
 # Sevaro Pulse: Tele-Neurology Operations Command Center
 
-###AWS Deployment [Link] : http://34.194.72.255/
+### AWS Deployment [Link] : http://34.194.72.255/
 
 A hackathon build for the Rutgers Health Hack (Sevaro Challenge 2). It **detects**
 coverage risk across a tele-neurology network, helps operations **decide** on an
