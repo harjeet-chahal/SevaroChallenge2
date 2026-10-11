@@ -88,7 +88,7 @@ export function HospitalCoverage({ className }: { className?: string }) {
       className={className}
       title="Hospital coverage"
       icon={Hospital}
-      description={`Required vs available credentialed physicians, now and for the next ${report?.horizon_minutes ?? 90} minutes. Each hospital uses its own local time.`}
+      info={`Required vs available credentialed physicians, now and for the next ${report?.horizon_minutes ?? 90} minutes. Each hospital uses its own local time.`}
     >
       {report && selected ? (
         <div className={cn("space-y-4", coverage.loading && "opacity-60 transition-opacity")}>

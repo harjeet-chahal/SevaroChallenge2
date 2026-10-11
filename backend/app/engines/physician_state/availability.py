@@ -11,6 +11,7 @@ Rules are evaluated top to bottom; the first that applies decides availability:
   R6_CAMERA_IN_MEETING      camera active while In Meeting                   -> available
                             (internal meetings are interruptible)
   R7_IN_MEETING             In Meeting, camera not active                    -> available
+                            (flagged unverified when the agent is offline)
   R8_AGENT_OFFLINE          desktop agent offline                            -> available
                             (routing assumes available; flagged as unverified)
   R9_DOCUMENTATION          writing a note (consult in Documentation)       -> available
@@ -18,8 +19,10 @@ Rules are evaluated top to bottom; the first that applies decides availability:
   R10_DEFAULT               none of the above                                -> available
 
 Camera rules (R5/R6) only apply while the agent is online: an offline agent means the
-camera state is unknown. Every input signal is echoed in the explanation, including the
-ones a higher-priority rule overrode.
+camera state is unknown. An offline agent is flagged whichever rule decides (busy:
+``agent_offline``; available: ``availability_unverified``), so it is always surfaced.
+Every input signal is echoed in the explanation, including the ones a higher-priority rule
+overrode.
 """
 
 from __future__ import annotations
@@ -146,8 +149,8 @@ def decide_availability(i: AvailabilityInputs) -> AvailabilityDecision:
             flags.append(
                 SignalFlag(
                     code="agent_offline",
-                    message="Desktop agent offline; camera state unknown.",
-                    severity=Severity.INFO,
+                    message="Desktop agent offline; camera state unknown, so once this "
+                    "session ends availability cannot be verified.",
                 )
             )
 
@@ -202,11 +205,21 @@ def decide_availability(i: AvailabilityInputs) -> AvailabilityDecision:
             "camera active while In Meeting is an internal meeting, which is interruptible.",
         )
     if in_meeting:
+        if agent_offline:
+            # "In Meeting" is self-reported: with the agent offline nothing confirms it.
+            flags.append(
+                SignalFlag(
+                    code="availability_unverified",
+                    message="Desktop agent offline: In Meeting is treated as available, but "
+                    "this is unverified (camera state unknown).",
+                )
+            )
         return decision(
             Availability.AVAILABLE,
             DerivedActivity.IN_MEETING,
             "R7_IN_MEETING",
-            "internal meetings are interruptible.",
+            "internal meetings are interruptible"
+            + (" (unverified: desktop agent offline)." if agent_offline else "."),
         )
 
     activity = (

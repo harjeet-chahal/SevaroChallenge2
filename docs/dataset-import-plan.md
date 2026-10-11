@@ -16,8 +16,11 @@ SAMPLE DATA.
 Safety (`sources.py`): ZIPs are read in memory and never extracted. Entries with
 absolute paths or `..` are rejected (path traversal). The upload size, total
 uncompressed size (enforced while reading, not just from the declared sizes) and entry
-count are capped (`MAX_*` settings). `__MACOSX/` and dotfiles are ignored; directories
-are flattened.
+count are capped (`MAX_*` settings); the uncompressed and entry limits apply to the whole
+upload, summed over every archive and plain file. Corrupt, truncated, encrypted or
+unsupported-compression archives fail with a 422 report (`archive_invalid`,
+`archive_unreadable`, `archive_encrypted`). `__MACOSX/` and dotfiles are ignored;
+directories are flattened.
 
 ## 2. Files
 
@@ -77,6 +80,8 @@ Other overridable settings include `events.status_description_pattern`,
 | Event references unknown physician/hospital | warning (events kept) |
 | Hospital time zone not IANA | mapped via `timezone_labels` (reported) or **error** |
 | Duplicate hospital / physician IDs (across both rosters) | error |
+| Event ID over 128 characters, or event timestamp outside years 1900–2200 | row rejected (as above) |
+| Hospital / physician ID over 128 characters, roster time outside 1900–2200, other schema violation (e.g. `nan` hours) | error (`invalid_id`, `invalid_datetime`, `invalid_row`) |
 | Credential/baseline/coverage row → unknown physician or hospital | error |
 | Wide credential matrix header not matching a hospital | error (exact → configured prefix → unique `-suffix` match, each reported) |
 | Bad booleans / numbers / hours / time blocks | error with file, row, column, value |

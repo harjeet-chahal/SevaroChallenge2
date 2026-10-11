@@ -107,6 +107,7 @@ def get_intervention(
     opt_cache: OptCache,
 ) -> Intervention:
     service = _svc(db, settings, cache, opt_cache)
+    service.get(intervention_id, actor)  # role check first: a refused caller changes nothing
     service.sweep()
     return service.get(intervention_id, actor)
 

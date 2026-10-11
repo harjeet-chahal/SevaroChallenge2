@@ -33,6 +33,9 @@ there is no mutable "current value" that a late event could corrupt.
 - `event_id`, `event_type`, `event_time` are required; `ingested_at` is required for
   dataset rows and defaults to the **simulation** time for live injection.
 - Timestamps must be ISO-8601 **with** a UTC offset (or `Z`). Naive values are rejected.
+- Timestamps must fall in years 1900–2200, and IDs (`event_id`, `consult_id`,
+  `physician_id`, `hospital_id`) are at most 128 characters; otherwise that row is
+  rejected with a field-level error (a CSV append keeps its other rows).
 - Required associations per documented type (`catalog.py`), e.g. `video_started` needs
   `physician_id` and `consult_id`; `physician_status_changed` needs a status.
 - `physician_status_changed` status: a `status` column, or — documented fallback — a
@@ -124,8 +127,8 @@ wall clock (`server_time` is reported separately for contrast).
 | Endpoint | Effect |
 | --- | --- |
 | `GET /api/simulation` | current time, reference time + source, events not yet ingested, server time |
-| `POST /api/simulation/time` `{"time": "...+offset"}` | set any time (naive rejected) |
-| `POST /api/simulation/advance` `{"minutes": 5}` | move forward |
+| `POST /api/simulation/time` `{"time": "...+offset"}` | set a time (naive rejected; must be within a year of the loaded data, else 422 `simulation_time_out_of_range`) |
+| `POST /api/simulation/advance` `{"minutes": 5}` | move forward (same window) |
 | `POST /api/simulation/reset` | back to the reference time |
 
 Reference time on import, first match wins: `reference_time` form field → dataset
@@ -146,7 +149,7 @@ The chosen source is reported.
 | GET | `/api/consultations?as_of=&open=&hospital_id=&physician_id=&stage=` · `/{id}` | consult states |
 | GET | `/api/events?as_of=&physician_id=&consult_id=&event_type=&visibility=&dedupe=&recognized=&order=&limit=&offset=` | annotated event log |
 | POST | `/api/events` | inject one event or a list (all-or-nothing) |
-| POST | `/api/events/csv` | append rows in `event_stream.csv` format |
+| POST | `/api/events/csv` | append rows in `event_stream.csv` format. Valid rows are stored and invalid ones reported (`rejected` outcomes, also in `/api/events/rejections`); 422 only if no row is valid or the file can't be read. An unquoted comma inside `description` is joined back into that column (warning). The delimiter is read from the header line; quoting is always standard `"` |
 | GET | `/api/events/rejections` | every rejected record |
 
 `/api/config` reports `simulation_time`, `dataset_loaded` and `data_version` (bumped on
@@ -156,9 +159,16 @@ every import or injection), which the UI polls to know when to refetch.
 
 - Column names other than `event_time`/`ingested_at` are not documented; they are matched
   through explicit aliases (brief display headers included) and reported per import.
-- Phone-only Note Pending timing (call end at Provider Contacted) is an interpretation of
-  "Note Pending + Documentation, from end of video or call".
-- Ringing is cleared by the call starting or ending for that consult; there is no ringing
-  timeout.
+- Phone-only Note Pending timing (a call ending at Provider Contacted, or at Imaging
+  Review once scans are back) is an interpretation of "Note Pending + Documentation, from
+  end of video or call". It is provisional: a later imaging or video event supersedes it.
+- A ring stops when the consult moves on: the call is answered (by anyone), the consult is
+  assigned to someone else, routing fails, or it is signed off. A ring left unanswered for
+  5 minutes (the routing retry interval) is treated as over (assumption).
+- A consult rung or failed by routing without a triage event is still waiting for a doctor:
+  `routing_started_at` records the first ring or failed attempt, and the "Triaged, not yet
+  assigned" standard is timed from it (flagged).
+- A `shift_started` after a physician's scheduled shift has ended starts a new shift with no
+  known end (flag `shift_restarted`).
 - Counting definitions for "consults" and "calls" are ours; snapshot verification will
   surface any difference rather than hide it.

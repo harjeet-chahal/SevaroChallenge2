@@ -31,7 +31,12 @@ from app.schemas.dispatch import DispatchPlan, DispatchResult, SolverRun
 def solve_dispatch(
     problem: DispatchProblem,
 ) -> tuple[dict[str, str], SolverRun, str]:
-    solved = solve_min_cost_flow(problem)
+    try:
+        solved = solve_min_cost_flow(problem)
+    except RuntimeError as exc:  # e.g. BAD_COST_RANGE on a very large problem
+        pairs, run = solve_greedy(problem)
+        run.notes.append(f"The exact solver could not run ({exc}); greedy fallback used.")
+        return pairs, run, "fallback_greedy"
     if solved is not None:
         pairs, run = solved
         return pairs, run, "min_cost_flow"

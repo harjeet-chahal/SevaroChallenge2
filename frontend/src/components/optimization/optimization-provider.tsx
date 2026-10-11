@@ -28,12 +28,15 @@ interface OptimizationContextValue {
 const OptimizationContext = createContext<OptimizationContextValue | null>(null);
 
 /**
- * Backend optimizer recommendations, refetched whenever the dataset version or the
- * simulation time changes. Read-only: nothing here assigns, offers or changes staffing.
+ * Backend optimizer recommendations, refetched whenever the dataset version, the workflow
+ * version (offers sent, declined, accepted change who can be asked) or the simulation time
+ * changes. Read-only: nothing here assigns, offers or changes staffing.
  */
 export function OptimizationProvider({ children }: { children: React.ReactNode }) {
   const { config } = useSystemStatus();
-  const key = config?.dataset_loaded ? `${config.data_version}|${config.simulation_time}` : null;
+  const key = config?.dataset_loaded
+    ? `${config.workflow_version}|${config.data_version}|${config.simulation_time}`
+    : null;
   const dispatch = useKeyedResource(key, (signal) => optimizationApi.assignments(signal));
   const staffing = useKeyedResource(key, (signal) => optimizationApi.splitShifts(signal));
   const comparison = useKeyedResource(key, (signal) => optimizationApi.comparison(signal));

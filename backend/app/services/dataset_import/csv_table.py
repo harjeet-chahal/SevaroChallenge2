@@ -41,15 +41,15 @@ def read_csv(file: str, data: bytes, log: IssueLog) -> CsvTable | None:
             file=file,
         )
 
-    sample = text[:4096]
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|") if sample.strip() else csv.excel
-    except csv.Error:
-        dialect = csv.excel
-    reader = csv.reader(io.StringIO(text), dialect)
+    delimiter = _delimiter(text)
+    # Standard quoting ("...") whatever the delimiter: a sniffed dialect can pick ' as the
+    # quote character from text like "status: 'Available'" and then split real rows.
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
 
     headers: list[str] | None = None
+    free_text: int | None = None
     rows: list[CsvRow] = []
+    number = 0
     for line in reader:
         if not any(cell.strip() for cell in line):
             continue
@@ -65,11 +65,11 @@ def read_csv(file: str, data: bytes, log: IssueLog) -> CsvTable | None:
                     file=file,
                 )
                 return None
+            free_text = _free_text_column(normalized)
             continue
-        number = len(rows) + 1
-        if len(line) > len(headers):
-            extra = [c for c in line[len(headers) :] if c.strip()]
-            if extra:
+        number += 1
+        if len(line) > len(headers) and any(c.strip() for c in line[len(headers) :]):
+            if free_text is None:
                 log.add(
                     IssueSeverity.ERROR,
                     "row_too_long",
@@ -78,6 +78,21 @@ def read_csv(file: str, data: bytes, log: IssueLog) -> CsvTable | None:
                     row=number,
                 )
                 continue
+            # An unquoted delimiter inside free text (e.g. a description with a comma):
+            # put the extra cells back into that column instead of losing the row.
+            extra = len(line) - len(headers)
+            joined = delimiter.join(line[free_text : free_text + extra + 1])
+            line = [*line[:free_text], joined, *line[free_text + extra + 1 :]]
+            log.add(
+                IssueSeverity.WARNING,
+                "row_cells_joined",
+                f"row has {len(headers) + extra} cells but the header has {len(headers)}; "
+                f"the extra cells were joined into '{headers[free_text]}' (unquoted "
+                f"'{delimiter}' in free text)",
+                file=file,
+                row=number,
+                column=headers[free_text],
+            )
         cells = [*line, *([""] * (len(headers) - len(line)))]
         rows.append(
             CsvRow(
@@ -92,6 +107,24 @@ def read_csv(file: str, data: bytes, log: IssueLog) -> CsvTable | None:
         log.add(IssueSeverity.ERROR, "empty_file", "file has no header row", file=file)
         return None
     return CsvTable(file=file, headers=headers, rows=rows)
+
+
+DELIMITERS = (",", ";", "\t", "|")
+FREE_TEXT_COLUMNS = ("description", "details", "detail", "notes", "note", "comment", "comments")
+
+
+def _delimiter(text: str) -> str:
+    """The delimiter used in the header line (comma unless another one clearly is)."""
+    header = next((line for line in text.splitlines() if line.strip()), "")
+    counts = {d: header.count(d) for d in DELIMITERS}
+    best = max(DELIMITERS, key=lambda d: (counts[d], d == ","))
+    return best if counts[best] else ","
+
+
+def _free_text_column(normalized_headers: list[str]) -> int | None:
+    """Index of the one free-text column (e.g. ``description``), if there is exactly one."""
+    hits = [i for i, h in enumerate(normalized_headers) if h in FREE_TEXT_COLUMNS]
+    return hits[0] if len(hits) == 1 else None
 
 
 @dataclass

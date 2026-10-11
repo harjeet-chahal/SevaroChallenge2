@@ -392,6 +392,22 @@ def test_capacity_meets_base_requirements_all_day_but_free_count_does_not(inputs
 # --- 4. Off-shift physicians -----------------------------------------------------------
 
 
+def test_at_1820_the_top_alert_recommends_an_action_that_can_be_taken(official, analysis_1820):
+    """CON-2110's doctor is Temporarily Unavailable and every other doctor credentialed at
+    Harbor is busy: a reassignment would be refused, so the alert says escalate."""
+    top = analysis_1820.alerts.alerts[0]
+    assert top.consult_id == "CON-2110"
+    assert top.recommended_action_type.value == "escalate"
+    assert "no other credentialed physician" in top.recommended_action_reason
+    client, _ = official
+    preview = client.post(
+        "/api/interventions/preview",
+        headers=COORD,
+        json={"type": "reassign_consult", "alert_id": top.alert_id, "consult_id": "CON-2110"},
+    )
+    assert preview.json()["valid"] is False  # the reassignment it no longer recommends
+
+
 def test_at_1820_no_hospital_is_short_within_90_minutes_so_nobody_is_called(official):
     client, _ = official
     staffing = client.get("/api/optimization/split-shifts").json()
@@ -437,6 +453,21 @@ def test_at_1831_exactly_one_off_shift_physician_can_be_asked(inputs):
         assert row.remaining_weekly_hours == 60 - float(off[pid]["hours_worked_last_7d"])
         assert row.minutes_to_come_online == int(off[pid]["est_minutes_to_online"])
         assert row.latest_valid_end == _iso(off[pid]["next_shift_start"])
+
+
+def test_require_full_coverage_only_binds_the_hospitals_short_within_the_look_ahead(inputs):
+    events, reference = inputs
+    analysis = analyze(events, reference, NOW + timedelta(minutes=11), load_risk_config(None))
+    cfg = load_optimization_config(None)
+    strict = cfg.model_copy(
+        update={"staffing": cfg.staffing.model_copy(update={"require_full_coverage": True})}
+    )
+    result, _ = run_staffing(analysis, strict)
+
+    # Cedar Ridge and Redwood (21:00) are later gaps, not acted on yet: they must not make
+    # the Northfield plan infeasible.
+    assert result.solver.status == "OPTIMAL"
+    assert [r.physician_id for r in result.recommendations] == ["PHY-009"]
 
 
 @pytest.mark.parametrize(
@@ -562,3 +593,125 @@ def test_judge_csv_appends_to_the_official_day_without_resetting_anything(client
     assert [(i["id"], i["status"]) for i in interventions] == [
         (proposed.json()["id"], "pending_approval")
     ]
+
+
+# --- 7. Split-shift follow-through on the official day -----------------------------------
+
+LEAD = {"X-Demo-Role": "clinical_lead", "X-Demo-Actor-Id": "lead-1"}
+OKAFOR = {"X-Demo-Role": "physician", "X-Demo-Actor-Id": "PHY-009"}
+NORTHFIELD_GAP = "COVERAGE_GAP_PROJECTED:hospital:SYN-008"
+
+
+def _okafor_offer_sent(client) -> tuple[dict, dict]:
+    """18:31: Northfield's 20:00 gap enters the look-ahead; Okafor is proposed, approved and
+    sent an offer. Returns (intervention, offer)."""
+    files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
+    assert upload(client, files).status_code == 200
+    assert client.post("/api/simulation/advance", json={"minutes": 11}).status_code == 200
+    created = client.post(
+        "/api/interventions",
+        headers=COORD,
+        json={"type": "split_shift", "alert_id": NORTHFIELD_GAP},
+    )
+    assert created.status_code == 201, created.text
+    iid = created.json()["id"]
+    decided = client.post(
+        f"/api/interventions/{iid}/decision", headers=LEAD, json={"decision": "approve"}
+    )
+    assert decided.status_code == 200, decided.text
+    sent = client.post(f"/api/interventions/{iid}/send-offers", headers=LEAD)
+    assert sent.status_code == 200, sent.text
+    (offer,) = sent.json()["offers"]
+    assert offer["physician_id"] == "PHY-009"
+    return created.json(), offer
+
+
+def test_after_okafor_declines_the_tool_says_escalate_instead_of_asking_her_again(client):
+    _, offer = _okafor_offer_sent(client)
+    declined = client.post(
+        f"/api/offers/{offer['id']}/respond", headers=OKAFOR, json={"response": "decline"}
+    )
+    assert declined.status_code == 200, declined.text
+    assert client.post("/api/simulation/advance", json={"minutes": 2}).status_code == 200
+
+    again = client.post(
+        "/api/interventions",
+        headers=COORD,
+        json={"type": "split_shift", "alert_id": NORTHFIELD_GAP},
+    )
+    assert again.status_code == 422
+    reasons = " ".join(again.json()["error"]["details"]["blocking_reasons"])
+    assert "escalate instead of bending a rule" in reasons
+    assert "declined an offer for Northfield Medical" in reasons
+    rows = {
+        c["physician_id"]: c
+        for c in client.get("/api/optimization/split-shifts").json()["candidates"]
+    }
+    assert rows["PHY-009"]["failed_rules"] == ["not_declined"]
+
+
+def test_okafor_routing_count_is_set_at_go_live_from_the_physicians_working_then(client):
+    created, offer = _okafor_offer_sent(client)
+    # At proposal (18:31), the doctors covering Northfield now (Patel, Kim, Shah, Lee: 12-14
+    # consults each) have all left by 20:00. Only Cho, whose night shift starts at 19:00,
+    # works there then: the estimate is 0, not their median.
+    (item,) = created["offer_plan"]
+    assert item["seeded_consult_count"] == 0
+    assert "Dr. Hannah Cho 0" in item["protection_rationale"][0]
+    accepted = client.post(
+        f"/api/offers/{offer['id']}/respond", headers=OKAFOR, json={"response": "accept"}
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    # Cho takes two Northfield consults before Okafor comes online at 20:00.
+    rows = [
+        "event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,description"
+    ]
+    for i, clock in enumerate(("19:10", "19:40"), start=1):
+        at = f"2026-03-17T{clock}:00-04:00"
+        cid = f"CON-T{i}"
+        rows += [
+            f"T{i}-1,{at},{at},{cid},consult_received,,SYN-008,General Neuro consult received",
+            f"T{i}-2,{at},{at},{cid},consult_triaged,,SYN-008,Consult triaged",
+            f"T{i}-3,{at},{at},{cid},physician_assigned,PHY-011,SYN-008,Assigned",
+        ]
+    csv_body = "\n".join(rows) + "\n"
+    appended = client.post(
+        "/api/events/csv", files={"file": ("cho.csv", io.BytesIO(csv_body.encode()))}
+    )
+    assert appended.status_code in (200, 201), appended.text
+    assert client.post("/api/simulation/advance", json={"minutes": 91}).status_code == 200
+
+    live = client.get(f"/api/interventions/{created['id']}", headers=COORD).json()
+    (active,) = live["offers"]
+    assert active["status"] == "active"
+    assert active["seeded_consult_count"] == 2  # Cho's count at go-live
+    entries = client.get(f"/api/interventions/{created['id']}/audit", headers=COORD).json()
+    activation = next(e for e in entries["items"] if e["action"] == "physician_activated")
+    assert activation["details"]["seeded_consult_count_at_proposal"] == 0
+    assert activation["details"]["seeded_consult_count"] == 2
+
+
+def test_an_escalation_survives_its_projected_gap_becoming_current(client):
+    """Escalated at 19:58 while Northfield's 20:00 gap is projected; approved at 20:01, when
+    the alert is the current-gap alert. Same problem, so the approval goes through."""
+    files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
+    assert upload(client, files).status_code == 200
+    assert client.post("/api/simulation/advance", json={"minutes": 98}).status_code == 200
+    created = client.post(
+        "/api/interventions",
+        headers=COORD,
+        json={"type": "escalation", "alert_id": "COVERAGE_GAP_PROJECTED:hospital:SYN-008"},
+    )
+    assert created.status_code == 201, created.text
+    assert client.post("/api/simulation/advance", json={"minutes": 3}).status_code == 200
+    alerts = {a["alert_id"] for a in client.get("/api/alerts").json()["alerts"]}
+    assert "COVERAGE_GAP_NOW:hospital:SYN-008" in alerts
+
+    decided = client.post(
+        f"/api/interventions/{created.json()['id']}/decision",
+        headers=LEAD,
+        json={"decision": "approve"},
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "approved"

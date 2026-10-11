@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
 from app.core.time import NaiveDatetimeError, parse_iso_aware, to_utc
 from app.engines.event_processing.catalog import REQUIRED_FIELDS
+from app.schemas.common import EntityId
 from app.schemas.event import (
     KNOWN_EVENT_TYPES,
     EventSource,
@@ -26,6 +27,7 @@ from app.schemas.event import (
     NormalizedEvent,
 )
 from app.schemas.physician import SelfReportedStatus
+from app.schemas.simulation import SUPPORTED_RANGE, is_supported_time
 
 CANONICAL_EVENT_FIELDS: tuple[str, ...] = (
     "event_id",
@@ -78,6 +80,8 @@ class EventParsingRules(BaseModel):
 
 DEFAULT_EVENT_RULES = EventParsingRules()
 
+_ENTITY_ID: TypeAdapter[str] = TypeAdapter(EntityId)
+
 
 class EventValidationError(ValueError):
     def __init__(self, issues: list[FieldIssue], *, event_id: str | None, event_type: str | None):
@@ -114,9 +118,41 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _issues_from(exc: ValidationError) -> list[FieldIssue]:
+    """Field-level issues from a pydantic error, e.g. 'consult_id: String should have at
+    most 128 characters'."""
+    issues = []
+    for err in exc.errors():
+        name = ".".join(str(part) for part in err.get("loc", ())) or None
+        message = f"{name}: {err['msg']}" if name else str(err["msg"])
+        issues.append(FieldIssue(field=name, message=message))
+    return issues
+
+
+def _check_ids(values: Mapping[str, str | None], issues: list[FieldIssue]) -> None:
+    for name, value in values.items():
+        if value is None:
+            continue
+        try:
+            _ENTITY_ID.validate_python(value)
+        except ValidationError as exc:
+            issues.extend(
+                FieldIssue(field=name, message=f"{name}: {err['msg']} (got {len(value)})")
+                for err in exc.errors()
+            )
+
+
 def _parse_timestamp(name: str, raw: str, issues: list[FieldIssue]) -> datetime | None:
     try:
-        return to_utc(parse_iso_aware(raw, field=name))
+        parsed = parse_iso_aware(raw, field=name)
+        if is_supported_time(parsed):  # also keeps the UTC conversion from overflowing
+            return to_utc(parsed)
+        issues.append(
+            FieldIssue(
+                field=name,
+                message=f"{name} '{raw}' is outside the supported range ({SUPPORTED_RANGE})",
+            )
+        )
     except NaiveDatetimeError:
         issues.append(
             FieldIssue(
@@ -218,6 +254,15 @@ def normalize_event(
     hospital_id = _clean(fields.get("hospital_id"))
     description = _clean(fields.get("description"))
     payload: dict[str, Any] = {}
+    _check_ids(
+        {
+            "event_id": event_id,
+            "consult_id": consult_id,
+            "physician_id": physician_id,
+            "hospital_id": hospital_id,
+        },
+        issues,
+    )
 
     known = KnownEventType(event_type) if event_type in KNOWN_EVENT_TYPES else None
     if known is not None:
@@ -295,30 +340,35 @@ def normalize_event(
         warnings.append(f"event_time is {skew:.0f}s after ingested_at (clock skew)")
 
     raw_record = {str(k): _json_safe(v) for k, v in (raw if raw is not None else fields).items()}
-    event = NormalizedEvent(
-        event_id=event_id,
-        event_type=event_type,
-        event_time=event_time,
-        ingested_at=ingested_at,
-        event_time_raw=event_time_raw or "",
-        ingested_at_raw=ingested_raw or "",
-        consult_id=consult_id,
-        physician_id=physician_id,
-        hospital_id=hospital_id,
-        description=description,
-        payload=payload,
-        raw=raw_record,
-        source=source,
-        source_file=source_file,
-        source_row=source_row,
-        content_hash=content_hash(
+    try:
+        event = NormalizedEvent(
+            event_id=event_id,
             event_type=event_type,
             event_time=event_time,
+            ingested_at=ingested_at,
+            event_time_raw=event_time_raw or "",
+            ingested_at_raw=ingested_raw or "",
             consult_id=consult_id,
             physician_id=physician_id,
             hospital_id=hospital_id,
             description=description,
             payload=payload,
-        ),
-    )
+            raw=raw_record,
+            source=source,
+            source_file=source_file,
+            source_row=source_row,
+            content_hash=content_hash(
+                event_type=event_type,
+                event_time=event_time,
+                consult_id=consult_id,
+                physician_id=physician_id,
+                hospital_id=hospital_id,
+                description=description,
+                payload=payload,
+            ),
+        )
+    except ValidationError as exc:  # any schema constraint not checked above: still a row issue
+        raise EventValidationError(
+            _issues_from(exc), event_id=event_id, event_type=event_type
+        ) from exc
     return NormalizationResult(event=event, warnings=warnings, used_fallbacks=fallbacks)

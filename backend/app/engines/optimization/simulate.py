@@ -12,7 +12,8 @@ projection: what-if analysis cannot be used to preview an unsafe action as if it
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 
 from app.engines.analysis import OperationalAnalysis
@@ -29,7 +30,7 @@ from app.engines.optimization.split_shift import (
     offer_checks,
     proposed_window,
 )
-from app.engines.optimization.split_shift.candidates import Option
+from app.engines.optimization.split_shift.candidates import Decline, Option
 from app.engines.timeline import fmt_local
 from app.schemas.coverage import CoverageContributor
 from app.schemas.dispatch import RuleCheck, WorkloadChange
@@ -54,6 +55,12 @@ class ForecastConfig:
     horizon_minutes: int | None = None
     """Defaults to the analysis horizon (the dashboard forecast)."""
     step_minutes: int | None = None
+    offer_log: Mapping[str, tuple[int, int]] = field(default_factory=dict)
+    """physician_id -> (open offers or committed split shifts, offers in 7 days): the same
+    Phase 5 offer log the staffing optimizer uses, so a what-if never says "allowed" for a
+    physician who already has an open offer or reached the weekly limit."""
+    declines: Mapping[str, list[Decline]] = field(default_factory=dict)
+    """physician_id -> declined offers (the not_declined rule)."""
 
 
 def _violation(code: str, label: str, message: str) -> RuleCheck:
@@ -136,10 +143,18 @@ def _split_shift(
             explanations=[v.message],
         )
     ctx = build_planning_context(analysis, cfg)
+    ctx.offer_log = dict(fc.offer_log)
+    ctx.declines = {pid: list(rows) for pid, rows in fc.declines.items()}
     profile = next((x for x in analysis.reference.physicians if x.id == p.physician_id), None)
     cand = evaluate_candidate(p, profile, ctx)
     start = action.start or cand.eligibility.earliest_valid_start or state.as_of
-    scope = tuple(sorted(action.hospital_ids)) if action.hospital_ids else cand.scope
+    # Like candidate evaluation: with no gap hospital left in scope (e.g. declined), judge the
+    # credentialed hospitals so the failing rule is the one that explains why.
+    scope = (
+        tuple(sorted(action.hospital_ids))
+        if action.hospital_ids
+        else (cand.scope or tuple(sorted(p.credentialed_hospital_ids)))
+    )
     checks = offer_checks(
         p,
         profile,

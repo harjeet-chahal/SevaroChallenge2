@@ -5,6 +5,7 @@ import { ArrowRight, PhoneCall, UserCheck } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PendingActionButton } from "@/components/shared/pending-action-button";
 import { AvailabilityBadge, TagBadge } from "@/components/shared/status-badges";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -13,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalWorkflow } from "@/components/workflow/workflow-provider";
 import type { DispatchRecommendation, DispatchResult, UnassignedConsult } from "@/lib/api/types";
 
 import { Bullets, Disclosure, ProposedNote, SolverLine, urgencyTone } from "./shared";
@@ -31,6 +33,7 @@ const REASON_LABEL: Record<UnassignedConsult["reason_code"], string> = {
 };
 
 function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
+  const workflow = useOptionalWorkflow();
   return (
     <li className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -58,12 +61,29 @@ function RecommendationCard({ rec }: { rec: DispatchRecommendation }) {
             {rec.workload.consults_this_shift_after} consults this shift · cost {rec.edge_cost}
           </p>
         </div>
-        <PendingActionButton
-          label={rec.kind === "confirm_ringing" ? "Confirm" : "Assign"}
-          icon={UserCheck}
-          size="sm"
-          reason="Proposal only. Acting on recommendations arrives with the approval workflow (Phase 5)."
-        />
+        {rec.kind === "confirm_ringing" ? null : workflow ? (
+          // Opens a reassignment proposal for this physician; applying it is a separate step.
+          <Button
+            size="sm"
+            onClick={() =>
+              workflow.openComposer({
+                type: "reassign_consult",
+                consultId: rec.consult_id,
+                targetPhysicianId: rec.physician_id,
+              })
+            }
+          >
+            <UserCheck aria-hidden />
+            {rec.kind === "reassign" ? "Reassign" : "Assign"}
+          </Button>
+        ) : (
+          <PendingActionButton
+            label={rec.kind === "reassign" ? "Reassign" : "Assign"}
+            icon={UserCheck}
+            size="sm"
+            reason="Proposals are made from the coordinator view."
+          />
+        )}
       </div>
       <Disclosure summary="Why this recommendation">
         <Bullets items={rec.explanation} />

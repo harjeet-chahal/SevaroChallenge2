@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.engines.physician_state.availability import AvailabilityInputs, decide_availability
 from app.schemas.common import Severity
@@ -26,6 +26,15 @@ from app.schemas.physician import (
 )
 
 NO_CONSULT = "-"
+RING_TIMEOUT = timedelta(minutes=5)
+"""Assumption: a call left ringing this long was not answered; the routing engine retries
+every 5 minutes (brief), so the ring is treated as over rather than blocking the physician."""
+RING_ENDING_EVENTS = {
+    E.PHYSICIAN_ASSIGNED,
+    E.INCOMING_CALL_STARTED,
+    E.ROUTING_ATTEMPT_FAILED,
+    E.NOTE_SIGNED,
+}
 
 
 @dataclass
@@ -85,6 +94,7 @@ class PhysicianStateTracker:
         return self._signals.get(physician_id)
 
     def apply(self, event: StoredEvent) -> None:
+        self._end_rings(event)
         pid = event.physician_id
         if not pid:
             return
@@ -128,6 +138,16 @@ class PhysicianStateTracker:
         elif t == E.PHYSICIAN_ASSIGNED and event.consult_id:
             s.assignments.setdefault(event.consult_id, event.event_time)
 
+    def _end_rings(self, event: StoredEvent) -> None:
+        """A ring for a consult stops when the consult moves on: answered by anyone, assigned
+        to someone else, routing failed, or signed off."""
+        if not event.consult_id or event.event_type not in RING_ENDING_EVENTS:
+            return
+        for s in self._signals.values():
+            if event.event_type == E.PHYSICIAN_ASSIGNED and s.physician_id == event.physician_id:
+                continue  # the hospital is now reaching the assigned physician
+            s.ringing.pop(event.consult_id, None)
+
     @staticmethod
     def _end_session(
         sessions: dict[str, ActiveSession],
@@ -164,6 +184,18 @@ def _resolve_shift(
         if within or started_early:
             minutes = int((scheduled.end - as_of).total_seconds() // 60)
             return True, minutes, "On shift per roster schedule.", flags
+        if started is not None and scheduled.end <= started <= as_of:
+            # A new shift started after the scheduled one ended (e.g. an extra shift that
+            # arrived as an event): on shift again, with no known end.
+            flags.append(
+                SignalFlag(
+                    code="shift_restarted",
+                    message="shift_started after the scheduled shift ended: on shift again, "
+                    "end unknown.",
+                    severity=Severity.INFO,
+                )
+            )
+            return True, None, "On shift: shift_started after the scheduled shift ended.", flags
         return False, None, "Outside the scheduled shift.", flags
     if started is not None and started <= as_of:
         return True, None, "On shift: shift_started event (no scheduled end).", flags
@@ -204,7 +236,10 @@ def build_physician_state(
 
     calls = sorted(s.calls.values(), key=lambda x: (x.since, x.event_id))
     videos = sorted(s.videos.values(), key=lambda x: (x.since, x.event_id))
-    ringing = sorted(s.ringing.values(), key=lambda x: (x.since, x.event_id))
+    ringing = sorted(
+        (r for r in s.ringing.values() if as_of - r.since < RING_TIMEOUT),
+        key=lambda x: (x.since, x.event_id),
+    )
 
     decision = decide_availability(
         AvailabilityInputs(

@@ -20,6 +20,7 @@ from app.engines.optimization.config import OptimizationConfig
 from app.engines.optimization.solvers import SolverUnavailableError
 from app.engines.optimization.split_shift.candidates import (
     Candidate,
+    Decline,
     Option,
     PlanningContext,
     build_planning_context,
@@ -34,7 +35,12 @@ from app.engines.optimization.split_shift.cpsat import (
     solve_cpsat,
     solve_greedy,
 )
-from app.engines.optimization.split_shift.trap import protection_for, trap_analysis
+from app.engines.optimization.split_shift.trap import (
+    protection_for,
+    seed_count,
+    seed_peers,
+    trap_analysis,
+)
 from app.engines.timeline import fmt_local
 from app.schemas.dispatch import SolverRun
 from app.schemas.staffing import (
@@ -54,6 +60,8 @@ RULES_TEXT = [
     "The offer does not overlap a scheduled shift (brief).",
     "Offers are at least 2 hours; time to come online counts against the offer (brief).",
     "≤ 1 open offer per physician and ≤ 3 offers per week, from the system offer log (brief).",
+    "A physician who declined an offer is not asked again for the same hospital until that "
+    "offer would have ended (implementation choice).",
 ]
 
 
@@ -155,7 +163,7 @@ def _recommendation(
             )
         )
         dash = ctx.analysis.coverage_models.get(hid)
-        if dash is not None:
+        if dash is not None and ctx.analysis.coverage.horizon_minutes != ctx.horizon_minutes:
             b = round(dash.deficit_physician_minutes(), 4)
             a = round(dash.deficit_physician_minutes([window]), 4)
             effects.append(
@@ -219,6 +227,14 @@ def _recommendation(
     )
 
 
+def _why_not(ctx: PlanningContext, c: Candidate, hid: str) -> str:
+    if c.eligibility.failed_rules:
+        return ", ".join(c.eligibility.failed_rules)
+    if hid in ctx.declined_hospitals(c.physician_id):
+        return "declined an offer for this hospital"
+    return "eligible only for another short hospital"
+
+
 def _infeasibility(
     ctx: PlanningContext,
     candidates: list[Candidate],
@@ -236,10 +252,9 @@ def _infeasibility(
             lines.append(f"{name}: no off-shift physician is credentialed here.")
         elif not eligible_here:
             fails = "; ".join(
-                f"{c.state.display_name} ({', '.join(c.eligibility.failed_rules)})"
-                for c in credentialed
+                f"{c.state.display_name} ({_why_not(ctx, c, hid)})" for c in credentialed
             )
-            lines.append(f"{name}: every credentialed off-shift physician fails a rule — {fails}.")
+            lines.append(f"{name}: no credentialed off-shift physician can be asked — {fails}.")
         else:
             first = min(
                 c.earliest_start + timedelta(minutes=c.online_minutes)
@@ -263,11 +278,14 @@ def run_staffing(
     analysis: OperationalAnalysis,
     cfg: OptimizationConfig,
     offer_log: Mapping[str, tuple[int, int]] | None = None,
+    declines: Mapping[str, list[Decline]] | None = None,
 ) -> tuple[StaffingResult, StaffingInternals]:
     """``offer_log``: physician_id -> (open offers or committed split shifts, offers sent
-    in the rolling 7 days), from the Phase 5 workflow tables."""
+    in the rolling 7 days); ``declines``: physician_id -> declined offers. Both from the
+    Phase 5 workflow tables."""
     ctx = build_planning_context(analysis, cfg)
     ctx.offer_log = dict(offer_log or {})
+    ctx.declines = {pid: list(rows) for pid, rows in (declines or {}).items()}
     candidates = evaluate_candidates(ctx)
     options = generate_options(candidates, ctx)
     solution = solve_staffing(ctx, options)
@@ -418,8 +436,11 @@ def describe_option(
 
 __all__ = [
     "Candidate",
+    "Decline",
     "describe_option",
     "protection_for",
+    "seed_count",
+    "seed_peers",
     "trap_analysis",
     "Option",
     "PlanningContext",

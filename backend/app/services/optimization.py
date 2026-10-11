@@ -32,6 +32,7 @@ from app.engines.optimization import (
     staffing_section,
     trap_section,
 )
+from app.repositories.system import SystemRepository
 from app.repositories.workflow import WorkflowRepository
 from app.schemas.dispatch import DispatchResult
 from app.schemas.staffing import StaffingResult
@@ -94,15 +95,22 @@ class OptimizationService:
         )
 
     def _staffing(self, analysis: OperationalAnalysis, cfg: OptimizationConfig):
-        # Notification limits come from the workflow's offer log, which changes without a
-        # data-version bump (e.g. an offer sent or declined): key on the workflow version.
+        # Notification limits and declines come from the workflow's offer log, which changes
+        # without a data-version bump (e.g. an offer sent or declined): key on the workflow
+        # version.
         workflow = WorkflowRepository(self.session)
         key = (*self._key("staffing", analysis, cfg), workflow.workflow_version())
         window = WorkflowPolicy().week_window
+        sim = SystemRepository(self.session).get_simulation_state()
+        import_id = sim.active_import_id if sim else None
+        as_of = analysis.state.as_of
         return self._cached(
             key,
             lambda: run_staffing(
-                analysis, cfg, offer_log=workflow.offer_log(analysis.state.as_of, window)
+                analysis,
+                cfg,
+                offer_log=workflow.offer_log(as_of, window, import_id),
+                declines=workflow.declines(as_of, import_id),
             ),
         )
 
@@ -148,11 +156,20 @@ class OptimizationService:
     def simulate(self, request: SimulateRequest) -> WhatIfResult:
         cfg = self.config()
         analysis = self._analysis(request.as_of)
+        workflow = WorkflowRepository(self.session)
+        sim = SystemRepository(self.session).get_simulation_state()
+        import_id = sim.active_import_id if sim else None
+        as_of = analysis.state.as_of
         try:
             return simulate_intervention(
                 analysis,
                 request.action,
-                ForecastConfig(optimization=cfg, horizon_minutes=request.horizon_minutes),
+                ForecastConfig(
+                    optimization=cfg,
+                    horizon_minutes=request.horizon_minutes,
+                    offer_log=workflow.offer_log(as_of, WorkflowPolicy().week_window, import_id),
+                    declines=workflow.declines(as_of, import_id),
+                ),
             )
         except SolverUnavailableError as exc:  # pragma: no cover - simulate needs no solver
             raise OptimizerUnavailableError(str(exc)) from exc

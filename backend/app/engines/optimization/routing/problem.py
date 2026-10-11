@@ -6,7 +6,10 @@ Hard constraints (an edge consult -> physician exists only if all hold):
   BRIEF rule 2   not busy (Synapse call/video, suspected external video), phone not
                  ringing for another call, last call ended >= 2 minutes ago
   BRIEF avail.   not Temporarily Unavailable
-  scope          hospital inside the physician's routing scope (split-shift protection)
+  scope          hospital inside the physician's routing scope (split-shift protection),
+                 except an overdue consult at another credentialed hospital: an "overflow"
+                 edge that costs more than any regular edge, so it is used only when no
+                 one else can take the consult
   state          the consult is open, has no working assignee (we never move a consult
                  silently) and is in a routable stage
   capacity       at most ``sync_capacity`` new synchronous consults per physician per round;
@@ -17,17 +20,19 @@ Soft preferences become bounded integer edge costs (see ``DispatchWeights``).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.engines.analysis import OperationalAnalysis
 from app.engines.event_processing import normalize_label
 from app.engines.optimization.config import OptimizationConfig
-from app.engines.timeline import fmt_local
+from app.engines.timeline import fmt_local, local
 from app.schemas.common import Severity
 from app.schemas.consultation import ConsultationState, ConsultStage
 from app.schemas.dispatch import CostComponent, Exclusion, RuleCheck
+from app.schemas.hospital import Hospital
 from app.schemas.physician import Availability, PhysicianState
 
 ASYNC_STAGES = {
@@ -108,6 +113,9 @@ class Edge:
     physician_id: str
     cost: int
     components: tuple[CostComponent, ...]
+    overflow: bool = False
+    """Outside the physician's split-shift routing scope: a last resort for an overdue
+    consult (costs more than any regular edge)."""
 
 
 @dataclass
@@ -124,10 +132,16 @@ class DispatchProblem:
     max_edge_cost: int
     notes: list[str] = field(default_factory=list)
 
+    def recency_key(self, physician_id: str) -> tuple:
+        """Tie-break for equal costs: answered longest ago first (never answered first), then
+        physician id (brief rule 4)."""
+        ended = self.physicians[physician_id].last_call_ended_at
+        return (ended is not None, ended or datetime.min, physician_id)
+
     def edges_for(self, consult_id: str) -> list[Edge]:
         return sorted(
             (e for (c, _), e in self.edges.items() if c == consult_id),
-            key=lambda e: (e.cost, e.physician_id),
+            key=lambda e: (e.cost, self.recency_key(e.physician_id)),
         )
 
 
@@ -138,14 +152,47 @@ def _category(consult_type: str | None, categories: Mapping[str, list[str]]) -> 
     return next((cat for cat, labels in categories.items() if label in labels), None)
 
 
-def role_threshold(role: str | None, cfg: OptimizationConfig) -> tuple[int, bool]:
+def network_timezone(hospitals: Sequence[Hospital]) -> str:
+    """The zone most hospitals use (ties: alphabetical); shift times are read in it."""
+    zones = Counter(h.timezone for h in hospitals)
+    return min(zones, key=lambda z: (-zones[z], z)) if zones else "UTC"
+
+
+def role_threshold(
+    role: str | None,
+    cfg: OptimizationConfig,
+    *,
+    shift_start: datetime | None = None,
+    tz: str = "UTC",
+) -> tuple[int, bool]:
+    """(low-volume threshold, decided) from the roster role, else from the shift start."""
     r = cfg.routing
     label = normalize_label(role) if role else ""
     if label in {normalize_label(x) for x in r.night_role_labels}:
         return r.low_volume_night_max, True
     if label in {normalize_label(x) for x in r.day_role_labels}:
         return r.low_volume_day_max, True
+    if shift_start is not None:
+        return (
+            r.low_volume_night_max if is_night_start(shift_start, tz, cfg) else r.low_volume_day_max
+        ), True
     return r.low_volume_day_max, False
+
+
+def is_night_start(start: datetime, tz: str, cfg: OptimizationConfig) -> bool:
+    hour = local(start, tz).hour
+    r = cfg.routing
+    if r.night_shift_from_hour > r.night_shift_until_hour:
+        return hour >= r.night_shift_from_hour or hour < r.night_shift_until_hour
+    return r.night_shift_from_hour <= hour < r.night_shift_until_hour
+
+
+def shift_start_of(p: PhysicianState) -> datetime | None:
+    if p.temporary_shift is not None:
+        return p.temporary_shift.start_at
+    if p.scheduled_shift is not None:
+        return p.scheduled_shift.start
+    return p.shift_started_at or p.next_shift_starts_at
 
 
 def max_edge_cost(cfg: OptimizationConfig) -> int:
@@ -175,7 +222,11 @@ def physician_view(
     consults = {c.consult_id: c for c in analysis.state.consultations}
     open_ids = [cid for cid in p.open_consult_ids if cid in consults]
     open_async = sum(consults[cid].stage in ASYNC_STAGES for cid in open_ids)
-    threshold, role_known = role_threshold(p.roster_role, cfg)
+    tz = network_timezone(analysis.state.hospitals)
+    start = shift_start_of(p)
+    threshold, role_known = role_threshold(p.roster_role, cfg, shift_start=start, tz=tz)
+    label = normalize_label(p.roster_role) if p.roster_role else ""
+    labelled = label in {normalize_label(x) for x in [*r.night_role_labels, *r.day_role_labels]}
     count = p.consults_this_shift if seeded_count is None else seeded_count
     since_call = (
         (as_of - p.signals.last_call_ended_at).total_seconds() / 60
@@ -261,6 +312,12 @@ def physician_view(
         uncertainty.append(
             f"roster role '{p.roster_role or 'unknown'}' is not day/night; day low-volume "
             f"threshold ({threshold}) used"
+        )
+    elif not labelled and start is not None:
+        night = threshold == r.low_volume_night_max
+        uncertainty.append(
+            f"no day/night roster role: {'night' if night else 'day'} low-volume threshold "
+            f"({threshold}) from the shift start ({fmt_local(start, tz)})"
         )
     if seeded_count is not None:
         uncertainty.append(
@@ -436,6 +493,9 @@ def build_dispatch_problem(
         if c.assigned_physician_id is None:
             if c.stage in r.routable_unassigned_stages:
                 kind, reason = "assign", f"unassigned ({c.stage.value.replace('_', ' ')})"
+            elif c.routing_started_at is not None:
+                # Routing evidently started (a ring or a failed attempt) without a triage event.
+                kind, reason = "assign", "unassigned; routing started without a recorded triage"
             else:
                 skipped.append(
                     (
@@ -460,14 +520,16 @@ def build_dispatch_problem(
                 )
                 reason = f"assigned physician {assignee.display_name} is {state_txt}"
             else:
-                why = (
-                    f"assigned to {assignee.display_name if assignee else c.assigned_physician_id}"
-                    + (
-                        " (unavailable, but notes stay with their author)"
-                        if unavailable
-                        else " — never reassigned silently"
-                    )
-                )
+                who = assignee.display_name if assignee else c.assigned_physician_id
+                if not unavailable:
+                    detail = " — never reassigned silently"
+                elif c.stage in (ConsultStage.NOTE_PENDING, ConsultStage.DOCUMENTATION):
+                    detail = " (unavailable, but notes stay with their author)"
+                elif c.stage is ConsultStage.VIDEO_IN_PROGRESS:
+                    detail = " (a video visit is in progress; not moved mid-visit)"
+                else:
+                    detail = f" (unavailable; stage '{c.stage.value}' is not reassigned)"
+                why = f"assigned to {who}{detail}"
                 skipped.append((c.consult_id, c.stage.value, c.assigned_physician_id, why))
                 continue
 
@@ -511,8 +573,11 @@ def build_dispatch_problem(
     edges: dict[tuple[str, str], Edge] = {}
     exclusions: dict[str, list[Exclusion]] = {}
     credentialed_on_shift: dict[str, list[str]] = {}
+    regular_max = max_edge_cost(cfg)
+    overflow_level = SEVERITY_LEVEL[Severity(cfg.trap.overflow_min_severity)]
     for c in consults:
         excluded: list[Exclusion] = []
+        overdue = c.severity is not None and SEVERITY_LEVEL[Severity(c.severity)] >= overflow_level
         pool = sorted(
             v.physician_id
             for v in views.values()
@@ -526,7 +591,8 @@ def build_dispatch_problem(
                 reasons.append(f"call already ringing to {views[c.pinned_physician_id].name}")
             if pid == c.current_physician_id:
                 reasons.append("currently assigned (unavailable)")
-            if c.hospital_id not in v.scope:
+            overflow = c.hospital_id not in v.scope and cfg.trap.overflow_outside_scope and overdue
+            if c.hospital_id not in v.scope and not overflow:
                 reasons.append("outside routing scope (split-shift protection)")
             blocks = [
                 b
@@ -540,7 +606,16 @@ def build_dispatch_problem(
                 excluded.append(Exclusion(physician_id=pid, display_name=v.name, reasons=reasons))
                 continue
             cost, parts = edge_cost(v, "reassign" if c.kind == "reassign" else c.kind, cfg)
-            edges[(c.consult_id, pid)] = Edge(c.consult_id, pid, cost, parts)
+            if overflow:
+                extra = CostComponent(
+                    name="split_shift_overflow",
+                    value=regular_max + 1,
+                    detail=f"outside {v.name}'s split-shift hospitals "
+                    f"({', '.join(v.scope) or 'none'}); a last resort for an overdue consult, "
+                    "costed above any regular option",
+                )
+                cost, parts = cost + extra.value, (*parts, extra)
+            edges[(c.consult_id, pid)] = Edge(c.consult_id, pid, cost, parts, overflow=overflow)
         exclusions[c.consult_id] = excluded
 
     notes = [
@@ -559,7 +634,9 @@ def build_dispatch_problem(
         credentialed_on_shift=credentialed_on_shift,
         skipped=skipped,
         config=cfg,
-        max_edge_cost=max_edge_cost(cfg),
+        max_edge_cost=(
+            2 * regular_max + 1 if any(e.overflow for e in edges.values()) else regular_max
+        ),
         notes=notes,
     )
 

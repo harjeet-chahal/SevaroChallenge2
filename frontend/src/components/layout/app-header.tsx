@@ -2,13 +2,14 @@ import { Activity } from "lucide-react";
 import Link from "next/link";
 
 import { BackendStatusBadge } from "@/components/status/backend-status-badge";
+import { SimClock } from "@/components/status/sim-clock";
 
 import { RoleSwitcher } from "./role-switcher";
 
 export function AppHeader() {
   return (
     <header className="sticky top-0 z-40 bg-navy text-navy-foreground shadow-sm">
-      <div className="mx-auto flex max-w-screen-2xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-screen-2xl flex-col gap-2 px-4 py-2.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/"
@@ -19,16 +20,20 @@ export function AppHeader() {
             </span>
             <span className="leading-tight">
               <span className="block text-sm font-semibold sm:text-base">Sevaro Pulse</span>
-              <span className="hidden text-xs text-navy-foreground/70 md:block">
+              <span className="hidden text-xs text-navy-foreground/70 xl:block">
                 Tele-Neurology Operations Command Center
               </span>
             </span>
           </Link>
-          <BackendStatusBadge className="sm:hidden" />
+          <div className="flex items-center gap-2 lg:hidden">
+            <SimClock />
+            <BackendStatusBadge className="max-sm:hidden" />
+          </div>
         </div>
         <div className="flex items-center gap-3">
-          <RoleSwitcher className="w-full sm:w-auto" />
-          <BackendStatusBadge className="hidden sm:inline-flex" />
+          <SimClock className="max-lg:hidden" />
+          <RoleSwitcher className="w-full lg:w-auto" />
+          <BackendStatusBadge className="max-lg:hidden" />
         </div>
       </div>
     </header>

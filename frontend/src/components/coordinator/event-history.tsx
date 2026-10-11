@@ -25,6 +25,30 @@ import { formatTime } from "@/lib/format";
 import { eventTypeLabel } from "@/lib/labels";
 
 const PAGE = 50;
+/** The API serves at most this many events per request (GET /api/events `limit`). */
+const MAX_PER_REQUEST = 1000;
+
+/** The newest ``count`` events, fetched with ``offset`` in chunks the API accepts. */
+async function fetchEvents(params: EventQuery, count: number, signal: AbortSignal) {
+  const first = await eventsApi.list(
+    { ...params, limit: Math.min(count, MAX_PER_REQUEST), offset: 0 },
+    signal,
+  );
+  const items = [...first.items];
+  const seen = new Set(items.map((e) => e.sequence));
+  while (items.length < Math.min(count, first.total)) {
+    const next = await eventsApi.list(
+      { ...params, limit: Math.min(count - items.length, MAX_PER_REQUEST), offset: items.length },
+      signal,
+    );
+    // An event arriving between requests shifts the offsets: skip rows already shown.
+    const fresh = next.items.filter((e) => !seen.has(e.sequence));
+    if (!fresh.length) break;
+    fresh.forEach((e) => seen.add(e.sequence));
+    items.push(...fresh);
+  }
+  return { ...first, items };
+}
 
 function EventFlags({ e }: { e: EventView }) {
   return (
@@ -70,7 +94,7 @@ export function EventHistory({ className }: { className?: string }) {
     ? `${config.data_version}|${config.simulation_time}|${JSON.stringify(filters)}|${limit}`
     : null;
   const events = useKeyedResource(key, (signal) =>
-    eventsApi.list({ ...filters, limit, order: "ingested_desc" }, signal),
+    fetchEvents({ ...filters, order: "ingested_desc" }, limit, signal),
   );
   const page = events.data;
 
@@ -79,7 +103,7 @@ export function EventHistory({ className }: { className?: string }) {
       className={className}
       title="Event history"
       icon={History}
-      description="The stored event log, newest arrival first. Badges show how each event was treated at the current simulation time."
+      info="The stored event log, newest arrival first. Badges show how each event was treated at the current simulation time (late, duplicate, not yet ingested, injected)."
     >
       {config?.dataset_loaded ? (
         <div className="space-y-3">

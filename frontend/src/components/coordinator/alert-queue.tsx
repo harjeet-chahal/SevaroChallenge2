@@ -1,11 +1,8 @@
 "use client";
 
-import { BellRing, Building2, Clock, Stethoscope, User } from "lucide-react";
-import { useState } from "react";
+import { BellRing, Building2, ChevronRight, Hourglass, User } from "lucide-react";
 
 import { SectionCard } from "@/components/shared/section-card";
-import { SeverityBadge } from "@/components/shared/severity-badge";
-import { TagBadge } from "@/components/shared/status-badges";
 import { useAnalysis } from "@/components/state/analysis-provider";
 import { StateFallback } from "@/components/state/state-fallback";
 import { InterventionProgressBadge } from "@/components/workflow/status";
@@ -18,6 +15,8 @@ import { formatElapsed, formatTime } from "@/lib/format";
 import { ACTION_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
+import { type AlertFilter, useCoordinatorView } from "./view-provider";
+
 /** Elapsed time or predicted time — always from backend-computed fields. */
 export function alertTiming(a: Alert): string | null {
   if (a.minutes_to_impact !== null && a.minutes_to_impact > 0 && a.impact_at) {
@@ -29,27 +28,135 @@ export function alertTiming(a: Alert): string | null {
   return null;
 }
 
-const FILTERS: (Severity | "all")[] = ["all", "critical", "warning", "info"];
+/** "Critical in 10 min": only for alerts that will get worse soon. */
+function upcoming(a: Alert): string | null {
+  if (a.minutes_to_impact === null || a.minutes_to_impact <= 0) return null;
+  return `${a.critical_after_seconds ? "Critical" : "Due"} in ${Math.round(a.minutes_to_impact)} min`;
+}
 
-/** True when the recommended intervention is already under way or was completed. */
+const FILTERS: AlertFilter[] = ["all", "critical", "warning", "info"];
+
+export const SEVERITY_RAIL: Record<Severity, string> = {
+  critical: "bg-critical",
+  warning: "bg-warning",
+  info: "bg-info",
+};
+
+const FILTER_ACTIVE: Record<AlertFilter, string> = {
+  all: "border-primary bg-primary text-primary-foreground",
+  critical: "border-critical bg-critical text-white",
+  warning: "border-warning bg-warning text-white",
+  info: "border-info bg-info text-white",
+};
+
+/**
+ * True when someone is already acting on the alert (any linked intervention under way, e.g. an
+ * escalation instead of the recommended reassignment) or the recommended one was completed.
+ */
 export function recommendationActedOn(a: Alert, linked: Intervention[]): boolean {
   const type = ACTION_INTERVENTION_TYPES[a.recommended_action_type];
-  return linked.some((i) => i.type === type && (!i.is_terminal || i.status === "completed"));
+  return linked.some((i) => !i.is_terminal || (i.type === type && i.status === "completed"));
+}
+
+function AlertRow({
+  a,
+  active,
+  linked,
+  onSelect,
+}: {
+  a: Alert;
+  active: boolean;
+  linked: Intervention[];
+  onSelect: () => void;
+}) {
+  const soon = upcoming(a);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      className={cn(
+        "group relative flex w-full items-start gap-3 overflow-hidden rounded-lg border bg-card py-2.5 pr-2 pl-4 text-left transition-colors outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50",
+        active && "border-primary bg-primary/5 hover:bg-primary/5",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn("absolute inset-y-0 left-0 w-1", SEVERITY_RAIL[a.severity])}
+      />
+      <span className="sr-only">
+        {a.severity} severity, priority {a.priority}.{" "}
+      </span>
+      <span
+        aria-hidden
+        className="mt-px w-4 shrink-0 text-right text-xs font-semibold text-muted-foreground tabular-nums"
+      >
+        {a.priority}
+      </span>
+      <span className="min-w-0 flex-1 space-y-1">
+        <span className="line-clamp-2 text-sm leading-snug font-medium text-foreground">
+          {a.title}
+        </span>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          {a.hospital_name ? (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              <Building2 className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{a.hospital_name}</span>
+            </span>
+          ) : null}
+          {a.physician_name ? (
+            <span className="inline-flex items-center gap-1">
+              <User className="size-3 shrink-0" aria-hidden />
+              {a.physician_name}
+            </span>
+          ) : null}
+          {soon ? (
+            <span className="inline-flex items-center gap-1 font-medium text-warning">
+              <Hourglass className="size-3 shrink-0" aria-hidden />
+              {soon}
+            </span>
+          ) : null}
+        </span>
+        <span className="flex flex-wrap items-center gap-1.5 text-xs">
+          {linked[0] ? <InterventionProgressBadge intervention={linked[0]} /> : null}
+          {recommendationActedOn(a, linked) ? null : (
+            <span className="font-medium text-primary">
+              Next: {ACTION_LABELS[a.recommended_action_type]}
+            </span>
+          )}
+        </span>
+      </span>
+      <ChevronRight
+        className={cn(
+          "mt-0.5 size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground",
+          active && "text-primary group-hover:text-primary",
+        )}
+        aria-hidden
+      />
+    </button>
+  );
 }
 
 export function AlertQueue({ className }: { className?: string }) {
   const { alerts, selectedAlert, selectAlert } = useAnalysis();
+  const { alertFilter: filter, setAlertFilter: setFilter } = useCoordinatorView();
   const linkedTo = useAlertInterventions();
-  const [filter, setFilter] = useState<Severity | "all">("all");
   const data = alerts.data;
   const shown = data?.alerts.filter((a) => filter === "all" || a.severity === filter) ?? [];
 
   return (
     <SectionCard
       className={className}
-      title="Alert queue"
+      title="Needs attention"
       icon={BellRing}
-      description="Ranked by the backend: severity first, then clinical urgency, elapsed time, coverage risk and workflows affected. Select an alert to see why."
+      info="Live alerts ranked by the backend: severity first, then clinical urgency, elapsed time, coverage risk and workflows affected. An alert clears when the underlying problem changes."
+      action={
+        data ? (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {data.total} alert{data.total === 1 ? "" : "s"}
+          </span>
+        ) : null
+      }
     >
       {data ? (
         <div className={cn("space-y-3", alerts.loading && "opacity-60 transition-opacity")}>
@@ -66,14 +173,15 @@ export function AlertQueue({ className }: { className?: string }) {
                   type="button"
                   aria-pressed={filter === f}
                   onClick={() => setFilter(f)}
+                  disabled={f !== "all" && count === 0}
                   className={cn(
-                    "rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    "rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-40",
                     filter === f
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "bg-card text-muted-foreground hover:bg-muted",
+                      ? FILTER_ACTIVE[f]
+                      : "bg-card text-muted-foreground enabled:hover:bg-muted",
                   )}
                 >
-                  {f} · {count}
+                  {f} <span className="tabular-nums">{count}</span>
                 </button>
               );
             })}
@@ -81,74 +189,21 @@ export function AlertQueue({ className }: { className?: string }) {
           {shown.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {data.total === 0
-                ? "No alerts at this simulation time."
+                ? "All clear: no alerts at this simulation time."
                 : "No alerts at this severity."}
             </p>
           ) : (
-            <ol className="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
-              {shown.map((a) => {
-                const active = selectedAlert?.alert_id === a.alert_id;
-                const timing = alertTiming(a);
-                const linked = linkedTo(a);
-                return (
-                  <li key={a.alert_id}>
-                    <button
-                      type="button"
-                      onClick={() => selectAlert(a.alert_id)}
-                      aria-pressed={active}
-                      className={cn(
-                        "w-full rounded-lg border bg-card p-3 text-left transition-colors outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50",
-                        active && "border-primary ring-1 ring-primary/40",
-                      )}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5 w-6 shrink-0 text-right text-xs font-semibold text-muted-foreground tabular-nums">
-                          {a.priority}
-                        </span>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <SeverityBadge severity={a.severity} />
-                            <span className="text-sm font-semibold text-navy">{a.title}</span>
-                          </div>
-                          <p className="line-clamp-2 text-sm text-muted-foreground">{a.summary}</p>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                            {a.hospital_name ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Building2 className="size-3" aria-hidden />
-                                {a.hospital_name}
-                              </span>
-                            ) : null}
-                            {a.consult_id ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Stethoscope className="size-3" aria-hidden />
-                                {a.consult_id}
-                              </span>
-                            ) : null}
-                            {a.physician_name ? (
-                              <span className="inline-flex items-center gap-1">
-                                <User className="size-3" aria-hidden />
-                                {a.physician_name}
-                              </span>
-                            ) : null}
-                            {timing ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Clock className="size-3" aria-hidden />
-                                {timing}
-                              </span>
-                            ) : null}
-                            {linked[0] ? <InterventionProgressBadge intervention={linked[0]} /> : null}
-                            {recommendationActedOn(a, linked) ? null : (
-                              <TagBadge tone="info">
-                                {ACTION_LABELS[a.recommended_action_type]}
-                              </TagBadge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
+            <ol className="space-y-1.5 lg:max-h-[calc(100dvh-16rem)] lg:min-h-[24rem] lg:overflow-y-auto lg:pr-1">
+              {shown.map((a) => (
+                <li key={a.alert_id}>
+                  <AlertRow
+                    a={a}
+                    active={selectedAlert?.alert_id === a.alert_id}
+                    linked={linkedTo(a)}
+                    onSelect={() => selectAlert(a.alert_id)}
+                  />
+                </li>
+              ))}
             </ol>
           )}
           {data.notes.map((note) => (

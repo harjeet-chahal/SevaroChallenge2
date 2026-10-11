@@ -39,6 +39,7 @@ class _Consult:
     assignment_history: list[AssignmentChange] = field(default_factory=list)
     routing_failures: int = 0
     last_routing_failure_at: datetime | None = None
+    routing_started_at: datetime | None = None
     evidence: list[str] = field(default_factory=list)
     anomalies: list[StateAnomaly] = field(default_factory=list)
 
@@ -96,6 +97,10 @@ class ConsultationTracker:
         if event.event_type == E.ROUTING_ATTEMPT_FAILED:
             consult.routing_failures += 1
             consult.last_routing_failure_at = event.event_time
+        if event.event_type in (E.ROUTING_ATTEMPT_FAILED, E.INCOMING_CALL_RINGING):
+            # Routing has started even if no triage event was recorded.
+            if consult.routing_started_at is None or event.event_time < consult.routing_started_at:
+                consult.routing_started_at = event.event_time
 
         decision = decide_transition(consult.stage, consult.provisional, event.event_type)
         if decision.target is not None:
@@ -221,6 +226,7 @@ class ConsultationTracker:
                     assignment_history=consult.assignment_history,
                     routing_failures=consult.routing_failures,
                     last_routing_failure_at=consult.last_routing_failure_at,
+                    routing_started_at=consult.routing_started_at,
                     evidence_event_ids=consult.evidence,
                     anomalies=anomalies,
                 )

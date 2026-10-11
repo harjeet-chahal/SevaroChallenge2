@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import ConflictError
+from app.core.errors import AppError, ConflictError
 from app.core.time import to_utc, utc_now
 from app.repositories import EventRepository, SystemRepository
-from app.schemas.simulation import SimulationClock
+from app.schemas.simulation import SUPPORTED_RANGE, SimulationClock, is_supported_time
+
+CLOCK_MARGIN = timedelta(days=366)
+"""How far the clock may be set or advanced beyond the loaded data (earliest/latest event
+and the reference time). Further out every view is empty, and moving there would still
+run the workflow sweep (expiring offers, ending shifts)."""
 
 
 class SimulationService:
@@ -70,11 +76,49 @@ class SimulationService:
         self.session.commit()
         return self.clock()
 
+    def _out_of_range(self, message: str, **details: object) -> AppError:
+        return AppError(
+            message,
+            code="simulation_time_out_of_range",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            details={key: value for key, value in details.items() if value is not None},
+        )
+
+    def _check_range(self, moment: datetime) -> None:
+        """Keep the clock where the replay is meaningful (and date arithmetic is safe)."""
+        if not is_supported_time(moment):
+            raise self._out_of_range(
+                f"Simulation time must be within {SUPPORTED_RANGE}.", requested=moment
+            )
+        state = self.system.get_simulation_state()
+        anchors = [t for t in (*self.events.bounds(), state and state.reference_time) if t]
+        if not anchors:
+            return
+        earliest, latest = min(anchors) - CLOCK_MARGIN, max(anchors) + CLOCK_MARGIN
+        if not earliest <= to_utc(moment) <= latest:
+            raise self._out_of_range(
+                "Simulation time must be within a year of the loaded dataset "
+                f"({earliest.isoformat()} to {latest.isoformat()}).",
+                requested=moment,
+                earliest=earliest,
+                latest=latest,
+            )
+
     def set_time(self, moment: datetime) -> SimulationClock:
+        self.require_current_time()
+        self._check_range(moment)
         return self._move(moment)
 
     def advance(self, delta: timedelta) -> SimulationClock:
-        return self._move(self.require_current_time() + delta)
+        current = self.require_current_time()
+        try:
+            target = current + delta
+        except OverflowError as exc:
+            raise self._out_of_range(
+                f"Simulation time must be within {SUPPORTED_RANGE}.", current=current
+            ) from exc
+        self._check_range(target)
+        return self._move(target)
 
     def reset(self) -> SimulationClock:
         self.require_current_time()

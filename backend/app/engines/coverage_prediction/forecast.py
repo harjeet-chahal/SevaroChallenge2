@@ -56,6 +56,7 @@ from app.schemas.physician import Availability, PhysicianState
 
 UNCERTAIN_FLAGS = {
     "availability_unverified": "desktop agent offline — availability unverified",
+    "agent_offline": "desktop agent offline — camera state unknown",
     "agent_online_inferred": "agent online only inferred from a later desktop-agent event",
     "shift_assumed_from_roster": (
         "on shift only by roster next-shift start (no shift_started event)"
@@ -135,6 +136,14 @@ def physician_window(
             f"split shift activated through the approved workflow ({temp.intervention_id}); "
             f"ends {fmt_local(end, tz)}"
         )
+    elif (
+        p.scheduled_shift is not None
+        and p.shift_started_at is not None
+        and p.scheduled_shift.end <= p.shift_started_at
+    ):
+        # Started again after the scheduled shift ended (same rule as engines/physician_state).
+        start, end = p.shift_started_at, None
+        source = "shift_started after the scheduled shift ended; no known end"
     elif p.scheduled_shift is not None:
         start, end = p.scheduled_shift.start, p.scheduled_shift.end
         if p.shift_started_at is not None and p.shift_started_at < end:

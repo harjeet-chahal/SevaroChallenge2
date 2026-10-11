@@ -2,7 +2,7 @@
 
 Two optimizers sit on top of the Phase 3 analysis. They **recommend only**: no consult is
 assigned, no offer is created or sent, and no staffing changes. Everything is computed by
-the backend and shown in the coordinator's **Recommendations** panel. Acting on a
+the backend and shown in the coordinator's **Optimizer** tab. Acting on a
 recommendation goes through the Phase 5 approval workflow ([workflow.md](workflow.md)).
 Accepted and activated split shifts flow back in as a time-aware overlay. An active
 physician is routed only inside the approved scope, with the seeded count.
@@ -38,6 +38,7 @@ ineligible physician, because ineligible pairs have no arc at all.
 | Consult | In the problem? |
 | --- | --- |
 | Open, unassigned, Triaged | yes, `assign` (ASSUMPTION: routing starts after triage) |
+| Open, unassigned, not triaged but already rung or failed by routing | yes, `assign` (routing evidently started) |
 | Call already ringing to an eligible physician | yes, pinned to that physician (`confirm_ringing`) |
 | Assigned to a Temporarily Unavailable or off-shift physician, before notes | yes, `reassign`, with a disruption cost and labelled as a proposal (ASSUMPTION) |
 | Assigned to a working physician | **no**: never moved silently (listed under "skipped") |
@@ -88,15 +89,27 @@ T[0]=0, T[k+1] = n·(T[k] + (cap+1)·S + W) + 1
    | reassignment | 150 | disruption |
    | k-th simultaneous consult | 100 × k | fairness (only if `sync_capacity` > 1) |
 
-4. **Stable tie-break**: lower physician id, scaled below one cost unit.
+4. **Stable tie-break**, scaled below one cost unit: whoever answered longest ago (rule 4;
+   the recency cost only spans 50 minutes, so this keeps the rule beyond that), then the
+   lower physician id. The baseline and the greedy fallback use the same order.
+
+**Day/night (rule 3).** The roster role decides (Day/Night). Without one (the on-shift
+roster has no role column; "Float"), the shift start in the network's main time zone
+(the zone most hospitals use) decides: a start from 17:00 to 05:00 is a night shift
+(ASSUMPTION, `night_shift_from_hour`/`night_shift_until_hour`). The routing view says which
+basis was used.
 
 \* The event stream has no separate "answered" timestamp after a call ends, so least
 recently answered is approximated by the most recent call end (ASSUMPTION). No
 hospital-level priority is applied, because the brief documents none (the coverage tier
 has no defined meaning).
 
-Waiting time is bucketed only if int64 would overflow. This happens only with very large
-problems and is reported in the solver notes.
+Waiting time is bucketed only if the costs would not fit OR-Tools' range (max arc cost ×
+node count, measured at about 3.7e18; checked against 2^60). For very large rounds (dozens
+of waiting consults across all urgency tiers) approximate priorities are used instead: a
+more urgent consult still beats a less urgent one one-for-one, but not any number of them.
+Both cases are reported in the solver notes; if the solver still refuses, the labelled
+greedy fallback runs instead of an error.
 
 **Baseline.** This is least-loaded routing modelled on the brief's rules 3–5, applied one
 consult at a time in arrival order: low volume first, then fewest consults, then least
@@ -119,7 +132,8 @@ problems.
 | `weekly_hours` | trailing-7-day hours + offered hours ≤ 60 | BRIEF |
 | `no_overlap` | offer ends at or before the next scheduled shift | BRIEF |
 | `min_length` | offer ≥ 2 h **after** the time to come online (the handbook: the time to get online "counts against what the offer is worth"). For a candidate it is judged on the longest offer the other limits allow (weekly hours, next shift, longest option); a limit already below 2 h fails that limit's rule instead | BRIEF |
-| `notification_limits` | ≤ 1 open offer (an accepted, unfinished split shift also counts), ≤ 3 per rolling 7 days, from the Phase 5 offer log | BRIEF |
+| `notification_limits` | ≤ 1 open offer (an accepted, unfinished split shift also counts), ≤ 3 per rolling 7 days, from the Phase 5 offer log of the **active dataset import** (offers made before a re-import, e.g. demo rehearsals, are not part of this day) | BRIEF |
+| `not_declined` | has not declined an offer for this hospital that is still running (until the declined offer's end). Only that hospital is left out: the physician can still be asked for another short hospital. A missed reply (expired offer) does not count as a decline | CHOICE |
 
 All rules are evaluated even after one fails. Each check returns the observed value,
 the threshold, a message and `missing_data`. **Missing data never passes:** missing
@@ -130,6 +144,11 @@ eligibility rule.
 Rules are evaluated at the earliest valid start: now, or when 10 hours of rest are
 reached. If rest is reached only after the planning window, `rest_10h` fails and the
 message says when rest would be reached.
+
+**Split shifts already worked** (completed, or cancelled after activation) count like a
+scheduled shift: their end is the last shift end for `rest_10h`, and their hours are added
+to the trailing 7-day hours for 7 days. An accepted or active split shift adds its planned
+hours.
 
 **Rolling 7-day window (ASSUMPTION, conservative).** The dataset gives hours worked in
 the trailing 7 days as of the simulation time. For an offer ending at *E* the true window
@@ -147,19 +166,25 @@ is (*E* − 7 d, *E*]. Work that might age out before *E* has unknown timing, so
 - **Planning window:** 240 min (CHOICE; offers last ≥ 2 h), used to choose offer starts
   and lengths and to value them. It is computed with the **same Phase 3 coverage engine**
   as the dashboard.
-- **Starts:** the earliest valid start, plus "deficit begins minus time to online" for each
-  deficit segment at the physician's gap hospitals (finite, ≤ 6).
-- **Lengths:** 120 / 180 / 240 / 360 min. An option that ends exactly at the next
-  scheduled shift is added when that is shorter. Every option is re-checked against
-  every rule before CP-SAT sees it.
+- **Starts:** the earliest valid start, plus "deficit begins (or deepens) minus time to
+  online minus a login buffer" at the physician's gap hospitals (finite, ≤ 6). The buffer
+  (`login_buffer_minutes`, 10 by default, CHOICE) puts the physician online a few minutes
+  before the gap, because the time to come online is an estimate.
+- **Lengths:** 120 / 180 / 240 / 360 min, plus (`fit_lengths_to_gap`) the shortest valid
+  offer (2 h of coverage + time to come online) and lengths that end exactly when a gap
+  ends, so offers don't run past the need. An option that ends exactly at the next
+  scheduled shift, or uses exactly the weekly hours left, is added when shorter. Every
+  option is re-checked against every rule before CP-SAT sees it.
 - **Coverage:** the effective window [start + time to online, end) counts at each
   hospital in the physician's routing scope. This is non-exclusive, as the brief defines
   coverage. `count_at_all_scope_hospitals: false` switches to exclusive counting.
 
 CP-SAT variables are x[o] ∈ {0, 1}. Constraints: at most one option per physician, at
 most `max_new_physicians` (3) in total, and for each hospital and elementary time piece
-`d ≥ base_deficit − Σ x`, `0 ≤ d ≤ base_deficit`. With `require_full_coverage`, Σ d = 0.
-In that case the result may be **INFEASIBLE**, and it is reported as such.
+`d ≥ base_deficit − Σ x`, `0 ≤ d ≤ base_deficit`. With `require_full_coverage`, Σ d = 0
+at the hospitals short within the look-ahead (later gaps are not acted on yet, so they
+cannot make the plan infeasible). The result may then be **INFEASIBLE**, and it is reported
+as such.
 
 **Lexicographic stages** (each fixes the previous optimum; CHOICE):
 1. remaining deficit physician-seconds
@@ -188,16 +213,32 @@ The brief: a physician joining mid-shift starts with zero consults, so least-loa
 sends them nearly every call at every credentialed hospital.
 
 **Protection policy** (CHOICE, configurable in `TrapPolicy`):
-1. **Routing scope**: limited to credentialed hospitals that have the gap.
-2. **Seeded consult count**: the median consults this shift of on-shift peers covering the
-   same hospitals (alternatives: `low_volume_threshold`, `none`).
+1. **Routing scope**: limited to credentialed hospitals that have the gap, with one
+   exception (`overflow_outside_scope`, on by default). A consult at another credentialed
+   hospital that already has an alert of at least `overflow_min_severity` (warning) gets an
+   "overflow" edge to the joiner. That edge costs more than any regular edge
+   (`split_shift_overflow` = the largest regular edge cost + 1), so the solver uses it only
+   when otherwise a consult would be left unassigned. The least-loaded baseline uses it only
+   when no regular option is left. A consult that is not overdue never reaches the joiner
+   from outside the scope. Without this, an idle joiner could watch a stranded stroke
+   consult at a hospital where they are credentialed.
+2. **Seeded consult count**: the median routing count of the physicians who will be
+   working at the same hospitals **when the joiner comes online**, read from the coverage
+   windows (alternatives: `low_volume_threshold`, `none`). A peer whose shift ends before
+   then is left out; one whose shift starts before then counts at 0. If nobody else works at
+   those hospitals then, the median of everyone working anywhere is used. The proposal
+   stores an estimate; at go-live the count is **recalculated** from the physicians working
+   at that moment and written to the offer, and the audit entry records both values.
 3. **Synchronous capacity**: the same as everyone else.
 
 **Demonstration (simulate only).** Arrivals over the first 120 min after the joiner comes
 online are modeled deterministically from each hospital's baseline hourly **mean**: one
 arrival each time the cumulative mean crosses *k* − 0.5. These are not forecast patients.
 Each arrival is routed with rules 3–4 under (a) unrestricted routing with a raw zero count
-and (b) the protected policy. Busy time is not modeled, which isolates the rule-4 effect.
+and (b) the protected policy, among the physicians counted at that hospital at that minute
+(the coverage windows: a shift that ends drops out, a shift that starts later, such as a
+night physician, joins at its start with 0 consults). Busy time is not modeled, which
+isolates the rule-4 effect.
 The result reports how many modeled consults go to the joiner, how many of those are at
 hospitals without a gap, and the highest load. Protection can raise peers' load at
 gap-free hospitals, and the comparison reports that honestly.
@@ -208,7 +249,9 @@ gap-free hospitals, and the comparison reports that honestly.
 `{"action": {"kind": "split_shift", "physician_id", "start", "duration_minutes", "hospital_ids"}}`
 or `{"action": {"kind": "assign_consult", "consult_id", "physician_id"}}`.
 
-- Every rule is checked first. A rule-breaking action returns `allowed: false` with the
+- Every rule is checked first, including the offer limits and declines from the Phase 5
+  offer log (so a physician with an open offer, three offers this week, or a declined offer
+  for that hospital is not "allowed"). A rule-breaking action returns `allowed: false` with the
   violations and **no projection**.
 - Otherwise the Phase 3 coverage engine runs twice: as is, and on a copy of the model
   with the proposed window (contributor status `proposed`). Both full `HospitalCoverage`
@@ -249,8 +292,9 @@ are in `backend/tests/test_optimization_scenario.py`.
   7 to 8 (baseline better on that metric).
 - **Staffing.** Seven off-shift physicians are considered. Exactly one (Dr. Gil Staff) is
   eligible; the six others fail opt-in, rest, weekly hours, overlap, credentialing and
-  missing data, one each. CP-SAT offers Gil 21:45–01:45Z (online 22:00Z) for Lakeside and
-  Summit, reducing the deficit over 240 min from 195 to 60 physician-minutes. Over the
+  missing data, one each. CP-SAT offers Gil 21:35–01:00Z (online 21:50Z, 10 minutes
+  before the 22:00Z gap, ending when the gap ends) for Lakeside and Summit, reducing the
+  deficit over 240 min from 195 to 60 physician-minutes. Over the
   90-min dashboard horizon, Lakeside goes from 30 to 0 and Summit from 15 to 0. Prairie's
   60 remain: its gap starts at 00:00Z, beyond the 90-min shortage look-ahead, so it is
   not acted on yet. Its only credentialed candidate (Mo) also has no recorded last shift

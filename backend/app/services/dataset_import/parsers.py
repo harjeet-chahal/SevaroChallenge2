@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone, tzinfo
-from typing import Any
+from functools import partial
+from typing import Any, TypeVar
 from zoneinfo import ZoneInfo
+
+from pydantic import TypeAdapter, ValidationError
 
 from app.core.time import parse_iso_aware, validate_timezone
 from app.engines.event_processing import (
@@ -14,11 +19,13 @@ from app.engines.event_processing import (
     normalize_event,
     normalize_label,
 )
+from app.schemas.common import EntityId
 from app.schemas.coverage import BaselineVolume, CoverageRequirement
 from app.schemas.dataset import ColumnMappingReport, IssueSeverity, TableImportSummary
 from app.schemas.event import KNOWN_EVENT_TYPES, EventSource, FieldIssue, NormalizedEvent
 from app.schemas.hospital import Hospital
 from app.schemas.physician import Physician, PhysicianSchedule, ShiftWindow
+from app.schemas.simulation import SUPPORTED_RANGE, is_supported_time
 from app.services.dataset_import.csv_table import ColumnResolution, CsvTable, resolve_columns
 from app.services.dataset_import.datetimes import (
     RosterDatetimeParser,
@@ -69,6 +76,71 @@ class ParseContext:
                 "phases; values left empty)",
                 file=table.file,
             )
+
+
+_ENTITY_ID: TypeAdapter[str] = TypeAdapter(EntityId)
+_T = TypeVar("_T")
+
+
+def _valid_id(ctx: ParseContext, value: str, *, label: str, file: str, row: int) -> bool:
+    """Reference IDs must fit the ID schema (at most 128 characters); otherwise the row
+    is an error, like an empty or duplicate ID."""
+    try:
+        _ENTITY_ID.validate_python(value)
+    except ValidationError as exc:
+        ctx.log.add(
+            IssueSeverity.ERROR,
+            "invalid_id",
+            f"{label} is not a usable ID: {exc.errors()[0]['msg']} (got {len(value)})",
+            file=file,
+            row=row,
+            column=label,
+            value=value,
+        )
+        return False
+    return True
+
+
+@contextmanager
+def _row_schema_errors(ctx: ParseContext, *, what: str, file: str, row: int) -> Iterator[None]:
+    """A schema violation the checks above did not catch (e.g. a NaN count) becomes an
+    error on that row, which is skipped, instead of an unhandled exception."""
+    try:
+        yield
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in err.get('loc', ())) or what}: {err['msg']}"
+            for err in exc.errors()
+        )
+        ctx.log.add(
+            IssueSeverity.ERROR, "invalid_row", f"{what} is invalid: {problems}", file=file, row=row
+        )
+
+
+def _roster_time(
+    ctx: ParseContext, parse: Callable[[], _T | None], raw: str, *, file: str, row: int, column: str
+) -> _T | None:
+    """Run a roster date/time parse (one moment or a shift window) and keep the result
+    within the supported years."""
+    try:
+        parsed = parse()
+    except OverflowError:  # e.g. year 1 with a positive offset has no UTC equivalent
+        parsed, in_range = None, False
+    else:
+        moments = parsed if isinstance(parsed, tuple) else (parsed,)
+        in_range = all(m is None or is_supported_time(m) for m in moments)
+    if not in_range:
+        ctx.log.add(
+            IssueSeverity.ERROR,
+            "invalid_datetime",
+            f"{column} '{raw}' is outside the supported range ({SUPPORTED_RANGE})",
+            file=file,
+            row=row,
+            column=column,
+            value=raw,
+        )
+        return None
+    return parsed
 
 
 def _bool(ctx: ParseContext, value: str | None, *, file: str, row: int, column: str) -> bool | None:
@@ -170,6 +242,8 @@ def parse_hospitals(ctx: ParseContext, table: CsvTable) -> dict[str, Hospital]:
                 row=row.number,
             )
             continue
+        if not _valid_id(ctx, hid, label="hospital_id", file=table.file, row=row.number):
+            continue
         if hid in hospitals:
             ctx.log.add(
                 IssueSeverity.ERROR,
@@ -196,13 +270,14 @@ def parse_hospitals(ctx: ParseContext, table: CsvTable) -> dict[str, Hospital]:
         name = res.get(row, "name")
         if name is None:
             unnamed += 1
-        hospitals[hid] = Hospital(
-            id=hid,
-            name=name or hid,
-            timezone=tz,
-            coverage_tier=res.get(row, "coverage_tier"),
-            attributes=res.extras(row),
-        )
+        with _row_schema_errors(ctx, what=f"hospital '{hid}'", file=table.file, row=row.number):
+            hospitals[hid] = Hospital(
+                id=hid,
+                name=name or hid,
+                timezone=tz,
+                coverage_tier=res.get(row, "coverage_tier"),
+                attributes=res.extras(row),
+            )
     if unnamed:
         ctx.log.add(
             IssueSeverity.WARNING,
@@ -397,6 +472,8 @@ def parse_physicians_on_shift(
                 row=row.number,
             )
             continue
+        if not _valid_id(ctx, pid, label="physician_id", file=table.file, row=row.number):
+            continue
         if pid in physicians:
             ctx.log.add(
                 IssueSeverity.ERROR,
@@ -423,19 +500,35 @@ def parse_physicians_on_shift(
                 row=row.number,
             )
             continue
-        window = dates.parse_shift(
-            start, end, file=table.file, row=row.number, column=column, zone_hint=hint
+        window = _roster_time(
+            ctx,
+            partial(
+                dates.parse_shift,
+                start,
+                end,
+                file=table.file,
+                row=row.number,
+                column=column,
+                zone_hint=hint,
+            ),
+            f"{start} - {end}",
+            file=table.file,
+            row=row.number,
+            column=column,
         )
         if window is None:
             continue
-        physicians[pid] = Physician(
-            id=pid,
-            display_name=res.get(row, "display_name") or pid,
-            roster="on_shift",
-            roster_role=res.get(row, "roster_role"),
-            schedule=PhysicianSchedule(current_shift=ShiftWindow(start=window[0], end=window[1])),
-            attributes=res.extras(row),
-        )
+        with _row_schema_errors(ctx, what=f"physician '{pid}'", file=table.file, row=row.number):
+            physicians[pid] = Physician(
+                id=pid,
+                display_name=res.get(row, "display_name") or pid,
+                roster="on_shift",
+                roster_role=res.get(row, "roster_role"),
+                schedule=PhysicianSchedule(
+                    current_shift=ShiftWindow(start=window[0], end=window[1])
+                ),
+                attributes=res.extras(row),
+            )
     ctx.summary(LogicalTable.PHYSICIANS_ON_SHIFT, [table.file], len(table.rows), len(physicians))
     return physicians
 
@@ -464,6 +557,8 @@ def parse_physicians_off_shift(
         if pid is None:
             ctx.log.add(IssueSeverity.ERROR, "missing_id", "physician_id is empty", file=f, row=n)
             continue
+        if not _valid_id(ctx, pid, label="physician_id", file=f, row=n):
+            continue
         if pid in physicians or pid in on_shift:
             ctx.log.add(
                 IssueSeverity.ERROR,
@@ -479,36 +574,39 @@ def parse_physicians_off_shift(
             value = res.get(row, name)
             if value is None:
                 return None
-            return dates.parse(
-                value, file=f, row=n, column=res.columns[name], zone_hint=res.zone_hints.get(name)
+            column = res.columns[name]
+            parse = partial(
+                dates.parse, value, file=f, row=n, column=column, zone_hint=res.zone_hints.get(name)
             )
+            return _roster_time(ctx, parse, value, file=f, row=n, column=column)
 
         def num(name: str, integer: bool, row=row, n=n, f=f):
             column = res.columns.get(name, name)
             return _number(ctx, res.get(row, name), file=f, row=n, column=column, integer=integer)
 
-        physicians[pid] = Physician(
-            id=pid,
-            display_name=res.get(row, "display_name") or pid,
-            roster="off_shift",
-            roster_role=res.get(row, "roster_role"),
-            split_shift_opt_in=_bool(
-                ctx,
-                res.get(row, "split_shift_opt_in"),
-                file=f,
-                row=n,
-                column=res.columns.get("split_shift_opt_in", "opt_in"),
-            ),
-            notification_channel=res.get(row, "notification_channel"),
-            schedule=PhysicianSchedule(
-                last_shift_ended_at=when("last_shift_ended_at"),
-                next_shift_starts_at=when("next_shift_starts_at"),
-                hours_worked_trailing_7d=num("hours_worked_trailing_7d", False),
-                minutes_to_come_online=num("minutes_to_come_online", True),
-                offers_declined_30d=num("offers_declined_30d", True),
-            ),
-            attributes=res.extras(row),
-        )
+        with _row_schema_errors(ctx, what=f"physician '{pid}'", file=f, row=n):
+            physicians[pid] = Physician(
+                id=pid,
+                display_name=res.get(row, "display_name") or pid,
+                roster="off_shift",
+                roster_role=res.get(row, "roster_role"),
+                split_shift_opt_in=_bool(
+                    ctx,
+                    res.get(row, "split_shift_opt_in"),
+                    file=f,
+                    row=n,
+                    column=res.columns.get("split_shift_opt_in", "opt_in"),
+                ),
+                notification_channel=res.get(row, "notification_channel"),
+                schedule=PhysicianSchedule(
+                    last_shift_ended_at=when("last_shift_ended_at"),
+                    next_shift_starts_at=when("next_shift_starts_at"),
+                    hours_worked_trailing_7d=num("hours_worked_trailing_7d", False),
+                    minutes_to_come_online=num("minutes_to_come_online", True),
+                    offers_declined_30d=num("offers_declined_30d", True),
+                ),
+                attributes=res.extras(row),
+            )
     ctx.summary(LogicalTable.PHYSICIANS_OFF_SHIFT, [table.file], len(table.rows), len(physicians))
     return physicians
 
@@ -779,15 +877,18 @@ def parse_baseline(
             )
             continue
         seen.add(key)
-        rows.append(
-            BaselineVolume(
-                hospital_id=hid,
-                hour_local=hour,
-                mean_consults=mean,
-                p90_consults=p90,
-                day_type=day_type,
+        with _row_schema_errors(
+            ctx, what=f"baseline for {hid} hour {hour}", file=f, row=row.number
+        ):
+            rows.append(
+                BaselineVolume(
+                    hospital_id=hid,
+                    hour_local=hour,
+                    mean_consults=mean,
+                    p90_consults=p90,
+                    day_type=day_type,
+                )
             )
-        )
     shift.report()
     ctx.summary(LogicalTable.BASELINE_VOLUME, [f], len(table.rows), len(rows))
     return rows
@@ -845,15 +946,18 @@ def parse_coverage(
         if hid is None or start is None or end is None or minimum is None:
             continue
         start, end = shift.to_local(start, hospitals[hid]), shift.to_local(end, hospitals[hid])
-        rows.append(
-            CoverageRequirement(
-                hospital_id=hid,
-                block_start_local=start,
-                block_end_local=end,
-                min_available_physicians=int(minimum),
-                day_type=res.get(row, "day_type"),
+        with _row_schema_errors(
+            ctx, what=f"coverage requirement for {hid}", file=f, row=row.number
+        ):
+            rows.append(
+                CoverageRequirement(
+                    hospital_id=hid,
+                    block_start_local=start,
+                    block_end_local=end,
+                    min_available_physicians=int(minimum),
+                    day_type=res.get(row, "day_type"),
+                )
             )
-        )
     shift.report()
     ctx.summary(LogicalTable.COVERAGE_REQUIREMENTS, [f], len(table.rows), len(rows))
     return rows

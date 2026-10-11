@@ -8,15 +8,18 @@ import type { ActionFeedback } from "./use-action";
 export function Feedback({ feedback }: { feedback: ActionFeedback | null }) {
   if (!feedback) return null;
   const error = feedback.tone === "error";
-  const Icon = error ? TriangleAlert : CircleCheck;
+  const warning = feedback.tone === "warning";
+  const Icon = error || warning ? TriangleAlert : CircleCheck;
   return (
     <div
-      role={error ? "alert" : "status"}
+      role={error || warning ? "alert" : "status"}
       className={cn(
         "flex gap-2 rounded-md border p-2.5 text-sm",
         error
           ? "border-critical-border bg-critical-soft text-critical"
-          : "border-success-border bg-success-soft text-success",
+          : warning
+            ? "border-warning-border bg-warning-soft text-warning"
+            : "border-success-border bg-success-soft text-success",
       )}
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />

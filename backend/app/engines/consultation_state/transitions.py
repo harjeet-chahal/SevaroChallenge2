@@ -11,9 +11,10 @@ Rules:
    anomaly is recorded and the stage is kept. State is never corrupted.
 3. A call *starting* moves Assigned -> Provider Contacted; later calls (e.g. checking
    imaging status) don't change the stage.
-4. A call *ending* while the consult is still at Provider Contacted means the call was
-   the clinical interaction, so the consult moves to Note Pending — *provisionally*.
-   A later imaging or video event overrides a provisional Note Pending.
+4. A call *ending* while the consult is still at Provider Contacted, or at Imaging Review
+   (scans back, then a phone-only consult), means the call was the clinical interaction,
+   so the consult moves to Note Pending — *provisionally*. A later imaging or video event
+   overrides a provisional Note Pending.
 5. Nothing changes after Signed Off; later events are recorded as anomalies.
 """
 
@@ -72,11 +73,12 @@ KEEP = TransitionDecision(target=None)
 
 def decide_transition(current: S | None, provisional: bool, event_type: str) -> TransitionDecision:
     if event_type in CALL_END_EVENTS:
-        if current is S.PROVIDER_CONTACTED:
+        if current in (S.PROVIDER_CONTACTED, S.IMAGING_REVIEW):
+            label = "Provider Contacted" if current is S.PROVIDER_CONTACTED else "Imaging Review"
             return TransitionDecision(
                 target=S.NOTE_PENDING,
                 provisional=True,
-                note="call ended at Provider Contacted: interaction treated as complete",
+                note=f"call ended at {label}: interaction treated as complete (phone only)",
             )
         return KEEP
 

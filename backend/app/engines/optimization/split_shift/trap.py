@@ -5,8 +5,10 @@ routing engine sends them nearly every call at every hospital they are credentia
 
 Protection (implementation choice, configurable in ``TrapPolicy``):
   1. routing scope = credentialed hospitals that have the gap (not the others);
-  2. seeded consult count = median consults this shift of on-shift peers who cover the same
-     hospitals, so rule 3/4 treat the joiner as an equal rather than an empty queue;
+  2. seeded consult count = median consults of the physicians who will be working at the
+     same hospitals when the joiner comes online, so rule 3/4 treat the joiner as an equal
+     rather than an empty queue. Peers who leave before then do not count; the seed is
+     estimated at proposal and recalculated at go-live from the physicians working then;
   3. synchronous capacity as for everyone else.
 
 Demonstration: modeled arrivals (deterministic, from the baseline hourly *mean* — not a
@@ -18,49 +20,145 @@ modeled, which isolates the rule-4 effect the brief describes.
 from __future__ import annotations
 
 import statistics
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
-from app.engines.optimization.routing.problem import role_threshold
+from app.engines.coverage_prediction import HospitalCoverageModel
+from app.engines.optimization.config import OptimizationConfig
+from app.engines.optimization.routing.problem import (
+    network_timezone,
+    role_threshold,
+    shift_start_of,
+)
 from app.engines.optimization.split_shift.candidates import Option, PlanningContext
-from app.schemas.physician import Availability, PhysicianState
+from app.engines.timeline import fmt_local
+from app.schemas.physician import PhysicianState
 from app.schemas.staffing import TrapAnalysis, TrapProtection, TrapRoutingOutcome
 
 
-def _peers(ctx: PlanningContext, hospitals: tuple[str, ...]) -> list[PhysicianState]:
-    on = [p for p in ctx.analysis.state.physicians if p.on_shift]
-    covering = [p for p in on if set(p.credentialed_hospital_ids) & set(hospitals)]
-    return covering or on
+def routing_count(p: PhysicianState) -> int:
+    """The consult count routing uses for ``p``: 0 before their shift has started, and an
+    active split shift's seeded count plus the consults taken since joining."""
+    if not p.on_shift:
+        return 0
+    temp = p.temporary_shift
+    if temp is not None and temp.phase == "active":
+        return temp.seeded_consult_count + p.consults_this_shift
+    return p.consults_this_shift
+
+
+def seed_peers(
+    physicians: Sequence[PhysicianState],
+    models: Mapping[str, HospitalCoverageModel],
+    joiner_id: str,
+    hospitals: Iterable[str],
+    at: datetime,
+    overlap_minutes: int = 0,
+) -> tuple[list[tuple[PhysicianState, int]], bool]:
+    """Physicians who will be working at ``hospitals`` at ``at`` (when the joiner comes
+    online), each with the count routing will use. Read from the coverage windows: a peer
+    whose shift ends before ``at`` is left out, and one whose shift starts before ``at`` is
+    included (at 0 consults until it starts). Other split shifts not yet active and what-if
+    windows are ignored. If nobody works at ``hospitals`` then, everyone working anywhere at
+    ``at`` is used instead; the flag is True when the peers cover ``hospitals``. With
+    ``overlap_minutes``, a peer must still be working that long after ``at``."""
+    by_id = {p.physician_id: p for p in physicians}
+    until = at + timedelta(minutes=overlap_minutes)
+
+    def working(hids: Iterable[str]) -> list[str]:
+        ids = {
+            w.physician_id
+            for hid in hids
+            if hid in models
+            for w in models[hid].windows
+            if w.physician_id != joiner_id
+            and not w.proposed
+            and not w.pending
+            and w.covers(at)
+            and (w.end is None or w.end >= until)
+        }
+        return sorted(i for i in ids if i in by_id)
+
+    ids = working(hospitals)
+    covering = bool(ids)
+    if not covering:
+        ids = working(models)
+    return [(by_id[i], routing_count(by_id[i])) for i in ids], covering
+
+
+def seed_count(
+    cfg: OptimizationConfig,
+    joiner_role: str | None,
+    peers: Sequence[tuple[PhysicianState, int]],
+    covering: bool,
+    hospitals: Sequence[str],
+    when: str,
+    *,
+    joiner_start: datetime | None = None,
+    tz: str = "UTC",
+) -> tuple[int, str]:
+    """The joiner's seeded routing count under the trap policy, with one line saying why.
+    ``when`` names the moment the peers were taken at (e.g. "at go-live (20:00 EDT)")."""
+    policy = cfg.trap.seed_policy
+    threshold, _ = role_threshold(joiner_role, cfg, shift_start=joiner_start, tz=tz)
+    if policy == "median_peer" and peers:
+        seed = int(statistics.median(n for _, n in peers))
+        if covering:
+            who = ", ".join(f"{p.display_name} {n}" for p, n in peers)
+            where = f"working at {', '.join(hospitals)} {when} ({who})"
+        else:
+            where = f"working anywhere {when} (nobody else works at {', '.join(hospitals)})"
+        return seed, (
+            f"Consult count seeded to {seed}, the median of the {len(peers)} physician(s) "
+            f"{where}, instead of 0."
+        )
+    if policy == "none":
+        return 0, "No seeding (policy 'none'): the joiner starts at 0 consults."
+    return threshold + 1, (
+        f"Consult count seeded to {threshold + 1} (just above the low-volume threshold "
+        f"{threshold}) so rule 3 does not give the joiner priority everywhere."
+    )
 
 
 def protection_for(option: Option, ctx: PlanningContext, credentials: list[str]) -> TrapProtection:
     trap = ctx.cfg.trap
     scope = list(option.hospitals)
     excluded = sorted(h for h in credentials if h not in scope)
-    peers = _peers(ctx, option.hospitals)
+    peers, covering = seed_peers(
+        ctx.analysis.state.physicians,
+        ctx.models,
+        option.physician_id,
+        scope,
+        option.online_at,
+        trap.seed_peer_overlap_minutes,
+    )
     profile = next(
         (p for p in ctx.analysis.state.physicians if p.physician_id == option.physician_id), None
     )
-    threshold, _ = role_threshold(profile.roster_role if profile else None, ctx.cfg)
-    rationale: list[str] = []
-    if trap.seed_policy == "median_peer" and peers:
-        seed = int(statistics.median(p.consults_this_shift for p in peers))
-        rationale.append(
-            f"Consult count seeded to {seed}, the median of {len(peers)} on-shift peers "
-            f"covering {', '.join(option.hospitals)}, instead of 0."
-        )
-    elif trap.seed_policy == "none":
-        seed = 0
-        rationale.append("No seeding (policy 'none'): the joiner starts at 0 consults.")
-    else:
-        seed = threshold + 1
-        rationale.append(
-            f"Consult count seeded to {seed} (just above the low-volume threshold {threshold}) "
-            "so rule 3 does not give the joiner priority everywhere."
-        )
+    online = fmt_local(option.online_at, ctx.tz_for(scope))
+    seed, line = seed_count(
+        ctx.cfg,
+        profile.roster_role if profile else None,
+        peers,
+        covering,
+        scope,
+        f"when they come online ({online})",
+        joiner_start=option.start,
+        tz=network_timezone(ctx.analysis.state.hospitals),
+    )
+    rationale = [line]
+    if trap.seed_policy == "median_peer":
+        rationale.append("Estimated now; recalculated at go-live from the physicians working then.")
     if excluded:
         rationale.append(
             f"Routing limited to the gap hospital(s) {', '.join(scope)}; not routed from "
-            f"{', '.join(excluded)} even though credentialed there."
+            f"{', '.join(excluded)} even though credentialed there"
+            + (
+                f", unless a consult there already has a {trap.overflow_min_severity} alert "
+                "and no one else can take it."
+                if trap.overflow_outside_scope
+                else "."
+            )
         )
     else:
         rationale.append(f"All credentialed hospitals ({', '.join(scope)}) have the gap.")
@@ -118,40 +216,49 @@ def _route(
 ) -> TrapRoutingOutcome:
     state = ctx.analysis.state
     never = datetime.min.replace(tzinfo=UTC)
+    by_id = {p.physician_id: p for p in state.physicians}
+    net_tz = network_timezone(state.hospitals)
+    # Who works where and when comes from the coverage windows, like the seed: peers who
+    # leave stop taking consults, and a shift that starts later (e.g. a night physician)
+    # joins at its start with the consult count routing would use (0 before it starts).
     people: dict[str, dict] = {}
-    for p in state.physicians:
-        if not p.on_shift or p.availability is Availability.UNAVAILABLE:
-            continue
-        threshold, _ = role_threshold(p.roster_role, ctx.cfg)
-        people[p.physician_id] = {
-            "creds": set(p.credentialed_hospital_ids),
-            "count": p.consults_this_shift,
-            "last": p.signals.last_call_ended_at or never,
-            "until": p.scheduled_shift.end if p.scheduled_shift else None,
-            "from": state.as_of,
-            "threshold": threshold,
-        }
+    for hid, model in ctx.models.items():
+        for w in model.windows:
+            p = by_id.get(w.physician_id)
+            if p is None or w.physician_id == option.physician_id or w.proposed or w.pending:
+                continue
+            if w.physician_id not in people:
+                threshold, _ = role_threshold(
+                    p.roster_role, ctx.cfg, shift_start=shift_start_of(p) or w.start, tz=net_tz
+                )
+                people[w.physician_id] = {
+                    "spans": {},
+                    "count": routing_count(p),
+                    "last": (p.signals.last_call_ended_at if p.on_shift else None) or never,
+                    "threshold": threshold,
+                }
+            people[w.physician_id]["spans"].setdefault(hid, []).append((w.start, w.end))
     joiner = next(p for p in state.physicians if p.physician_id == option.physician_id)
-    threshold, _ = role_threshold(joiner.roster_role, ctx.cfg)
+    threshold, _ = role_threshold(joiner.roster_role, ctx.cfg, shift_start=option.start, tz=net_tz)
     people[option.physician_id] = {
-        "creds": joiner_scope & set(joiner_creds),
+        "spans": {
+            hid: [(option.online_at, option.end)] for hid in joiner_scope & set(joiner_creds)
+        },
         "count": joiner_seed,
         "last": never,
-        "until": option.end,
-        "from": option.online_at,
         "threshold": threshold,
     }
+
+    def working(x: dict, hid: str, at: datetime) -> bool:
+        return any(a <= at and (b is None or at < b) for a, b in x["spans"].get(hid, ()))
+
     gap = set(option.hospitals)
     to_joiner = at_gap = unrouted = 0
     by_hospital: dict[str, dict[str, int]] = {}
     for at, hid in arrivals:
         row = by_hospital.setdefault(hid, {"arrivals": 0, "to_joiner": 0})
         row["arrivals"] += 1
-        pool = [
-            pid
-            for pid, x in people.items()
-            if hid in x["creds"] and x["from"] <= at and (x["until"] is None or at < x["until"])
-        ]
+        pool = [pid for pid, x in people.items() if working(x, hid, at)]
         if not pool:
             unrouted += 1
             continue
@@ -220,8 +327,9 @@ def trap_analysis(ctx: PlanningContext, option: Option, protection: TrapProtecti
     assumptions = [
         "Arrivals are modeled from the baseline hourly mean (deterministic rounding), not "
         "forecast patients.",
-        "Busy time is not modeled; each arrival goes to the routing-rule winner among "
-        "physicians on shift and not Temporarily Unavailable.",
+        "Busy time is not modeled; each arrival goes to the routing-rule winner among the "
+        "physicians counted at that hospital at that minute (coverage windows: shifts that end "
+        "drop out, shifts that start later join, Temporarily Unavailable excluded).",
         "Ties: least recently assigned in the model (initially last call end), then id.",
         *notes,
     ]

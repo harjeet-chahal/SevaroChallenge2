@@ -15,7 +15,7 @@ import { AuditTrail } from "@/components/workflow/audit-trail";
 import { Feedback } from "@/components/workflow/feedback";
 import { InterventionDetailView, OfferRows } from "@/components/workflow/intervention-detail";
 import { InterventionStatusBadge, InterventionTypeBadge } from "@/components/workflow/status";
-import { useAction } from "@/components/workflow/use-action";
+import { sentOffersFeedback, useAction } from "@/components/workflow/use-action";
 import { useWorkflow } from "@/components/workflow/workflow-provider";
 import { workflowApi } from "@/lib/api/endpoints";
 import type { Intervention } from "@/lib/api/types";
@@ -50,7 +50,7 @@ export function PendingApprovals({ className }: { className?: string }) {
       className={className}
       title="Pending approvals"
       icon={ClipboardCheck}
-      description="Interventions proposed by coordinators, waiting for your decision. No physician is contacted before you approve."
+      info="Interventions proposed by coordinators, waiting for your decision. No physician is contacted before you approve."
       action={pending.length ? <TagBadge tone="warning">{pending.length} waiting</TagBadge> : null}
     >
       {!interventions.data ? (
@@ -165,7 +165,7 @@ function DecisionPanel({ i }: { i: Intervention }) {
             onClick={() =>
               run("send", async () => {
                 const sent = await workflowApi.sendOffers(i.id, "clinical_lead");
-                return `Sent ${sent.offers.filter((o) => o.status === "sent").length} offer(s) (simulated; nothing leaves the system).`;
+                return sentOffersFeedback(sent, "(simulated; nothing leaves the system).");
               })
             }
           >
@@ -188,7 +188,7 @@ export function InterventionDetail({ className }: { className?: string }) {
       className={className}
       title="Intervention detail"
       icon={FileSearch}
-      description="The source problem, urgency, proposed action, candidate physicians and the rule each passed or failed, risks, alternatives and projected impact."
+      info="The source problem, urgency, proposed action, candidate physicians and the rule each passed or failed, risks, alternatives and projected impact."
     >
       {!interventions.data ? (
         <Waiting feature="intervention workflow" />
@@ -205,7 +205,8 @@ export function InterventionDetail({ className }: { className?: string }) {
             <InterventionTypeBadge type={selected.type} />
             <InterventionStatusBadge status={selected.status} />
           </div>
-          <DecisionPanel i={selected} />
+          {/* Keyed: a note, result or spinner never carries over to another intervention. */}
+          <DecisionPanel key={selected.id} i={selected} />
           {selected.offers.length ? (
             <OfferRows offers={selected.offers} tz={selected.problem.hospital_timezone} />
           ) : null}
@@ -226,7 +227,7 @@ export function ApprovalHistory({ className }: { className?: string }) {
       className={className}
       title="Approval history"
       icon={History}
-      description="Past decisions with who decided and when, and what happened to each offer."
+      info="Past decisions with who decided and when, and what happened to each offer."
     >
       {!interventions.data ? (
         <Waiting feature="audit log" />

@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Query, UploadFile, status
-from pydantic import AwareDatetime
 
 from app.api.deps import AppSettings, DbSession
 from app.core.errors import AppError
 from app.schemas.common import ApiModel
 from app.schemas.event import EventIngestResult, EventInput, EventPage, EventRejection
+from app.schemas.simulation import SupportedDatetime
 from app.services.events import EventFilters, EventOrder, EventService
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -23,7 +23,7 @@ class RejectionPage(ApiModel):
 def list_events(
     db: DbSession,
     settings: AppSettings,
-    as_of: Annotated[AwareDatetime | None, Query()] = None,
+    as_of: Annotated[SupportedDatetime | None, Query()] = None,
     physician_id: str | None = None,
     consult_id: str | None = None,
     hospital_id: str | None = None,

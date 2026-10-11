@@ -30,7 +30,7 @@ function PhysicianRow({ p }: { p: PhysicianState }) {
   const sessions = [...s.active_calls, ...s.active_videos];
 
   return (
-    <li className="py-3">
+    <li className="rounded-lg border bg-card p-3">
       <details className="group">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
           <div className="min-w-0">
@@ -153,11 +153,11 @@ export function PhysicianActivityPanel({ className }: { className?: string }) {
       className={className}
       title="Physician activity"
       icon={Users}
-      description="Availability derived from system signals, kept separate from consult stages. Expand a physician to see which signals decided it."
+      info="Availability derived from system signals (calls, video, camera, desktop agent, self-reported status), kept separate from consult stages. Expand a physician to see which signals decided it."
     >
       {data ? (
         <>
-          <ul className="divide-y">
+          <ul className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
             {onShift.map((p) => (
               <PhysicianRow key={p.physician_id} p={p} />
             ))}
@@ -168,7 +168,7 @@ export function PhysicianActivityPanel({ className }: { className?: string }) {
             </p>
           ) : null}
           {offShift.length ? (
-            <details className="mt-2 text-sm">
+            <details className="mt-3 text-sm">
               <summary className="cursor-pointer text-muted-foreground">
                 Off shift ({offShift.length})
               </summary>

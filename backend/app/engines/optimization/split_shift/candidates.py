@@ -14,13 +14,16 @@ Rules (BRIEF unless marked):
   min_length           offer >= 2 h *after* the time to come online (it counts against the
                        offer's value); judged on the longest offer the other limits allow
   notification_limits  <= 1 open offer and <= 3 offers this week (system offer log)
+  not_declined         has not declined an offer for this hospital that is still running
+                       (implementation choice: a "no" is not asked again for the same gap)
   off_shift            not currently on shift (structural)
 
 Rolling window (assumption, conservative): the dataset gives hours worked in the trailing
 7 days as of the simulation time. For an offer ending at E the true window is (E-7d, E];
 work that might age out between now and E is unknown, so it is NOT subtracted (this can
 only over-count hours, never under-count). Hours of proposals not yet accepted are not
-added; accepted split shifts are (Phase 5 workflow overlay adds them to the profile).
+added; accepted split shifts are, and a split shift already worked also sets the last
+shift end for the rest rule (Phase 5 workflow overlay updates the profile).
 """
 
 from __future__ import annotations
@@ -37,6 +40,17 @@ from app.engines.timeline import fmt_local, fmt_local_datetime
 from app.schemas.dispatch import RuleCheck
 from app.schemas.physician import Physician, PhysicianState
 from app.schemas.staffing import CandidateEligibility
+
+
+@dataclass(frozen=True)
+class Decline:
+    """A declined split-shift offer, from the Phase 5 offer log. Until the offer would have
+    ended, its hospitals are not offered to that physician again: the same gap, same "no"."""
+
+    offer_id: str
+    hospital_ids: tuple[str, ...]
+    declined_at: datetime
+    until: datetime
 
 
 @dataclass
@@ -58,6 +72,18 @@ class PlanningContext:
     offer_log: dict[str, tuple[int, int]] = field(default_factory=dict)
     """physician_id -> (open offers or committed split shifts, offers sent in the rolling
     7 days), from the Phase 5 workflow tables (see app.services.workflow)."""
+    declines: dict[str, list[Decline]] = field(default_factory=dict)
+    """physician_id -> declined offers in the current dataset (Phase 5 offer log)."""
+
+    def declined_hospitals(self, physician_id: str) -> dict[str, Decline]:
+        """Hospitals this physician declined an offer for that is still running at ``as_of``
+        (latest decline per hospital)."""
+        blocked: dict[str, Decline] = {}
+        for d in sorted(self.declines.get(physician_id, []), key=lambda d: d.declined_at):
+            if d.declined_at <= self.as_of < d.until:
+                for hid in d.hospital_ids:
+                    blocked[hid] = d
+        return blocked
 
     def tz_for(self, hospitals) -> str:
         """Time zone of the first listed hospital (explanations use hospital-local time)."""
@@ -354,6 +380,27 @@ def offer_checks(
             f"{st.max_offers_per_physician_per_week})"
         ),
     )
+
+    blocked = ctx.declined_hospitals(p.physician_id)
+    hit = sorted(h for h in scope if h in blocked and h in ctx.gap_hospitals)
+    if hit:
+        d = blocked[hit[0]]
+        message = (
+            f"declined an offer for {', '.join(ctx.hospital_name(h) for h in hit)} at "
+            f"{fmt_local(d.declined_at, tz)} ({d.offer_id}); not asked again for it before "
+            f"{fmt_local(d.until, tz)}"
+        )
+    else:
+        message = "has not declined an offer for this gap"
+    add(
+        "not_declined",
+        "Has not declined this gap",
+        not hit,
+        ", ".join(f"declined {h} until {fmt_local(blocked[h].until, tz)}" for h in hit) or "none",
+        "no declined offer still running for these hospitals",
+        message,
+        source="implementation_choice",
+    )
     return checks
 
 
@@ -368,9 +415,12 @@ def evaluate_candidate(
     if not st.online_time_counts_against_value:
         online_minutes = 0
     creds = sorted(p.credentialed_hospital_ids)
-    scope = tuple(h for h in creds if h in ctx.gap_hospitals)
+    # A hospital whose offer this physician declined (still running) is left out; if no gap
+    # hospital is left, the not_declined rule fails below.
+    blocked = ctx.declined_hospitals(p.physician_id)
+    scope = tuple(h for h in creds if h in ctx.gap_hospitals and h not in blocked)
     if not ctx.cfg.trap.restrict_scope_to_gap_hospitals:
-        scope = tuple(creds) if scope else ()
+        scope = tuple(h for h in creds if h not in blocked) if scope else ()
 
     last_end = schedule.last_shift_ended_at if schedule else None
     nxt = schedule.next_shift_starts_at if schedule else None
@@ -435,7 +485,18 @@ def evaluate_candidate(
                     "label": label,
                 }
             )
-    if not in_window and last_end is not None:
+    if not in_window and earliest <= ctx.as_of:
+        # Rested already: it is the time to come online that leaves nothing in the window.
+        for i, c in enumerate(checks):
+            if c.code == "min_length" and c.passed:
+                checks[i] = c.model_copy(
+                    update={
+                        "passed": False,
+                        "message": f"needs {online_minutes} min to come online, so no coverage "
+                        f"would fall inside the {ctx.horizon_minutes}-min planning window",
+                    }
+                )
+    elif not in_window and last_end is not None:
         for i, c in enumerate(checks):
             if c.code == "rest_10h" and c.passed:
                 checks[i] = c.model_copy(
@@ -529,14 +590,33 @@ def generate_options(candidates: list[Candidate], ctx: PlanningContext) -> list[
         if not cand.eligibility.eligible or cand.earliest_start is None:
             continue
         online = timedelta(minutes=cand.online_minutes)
+        lead = online + timedelta(minutes=st.login_buffer_minutes)
         starts = {cand.earliest_start}
+        gap_ends: set[datetime] = set()
         for hid in cand.scope:
-            for a, _, deficit in ctx.models[hid].deficit_profile():
-                s = a - online
-                if deficit > 0 and s > cand.earliest_start and s + online < ctx.plan_end:
+            profile = ctx.models[hid].deficit_profile()
+            previous = 0
+            for k, (a, b, deficit) in enumerate(profile):
+                deepens, previous = deficit > previous, deficit
+                if deficit <= 0:
+                    continue
+                if k + 1 == len(profile) or profile[k + 1][2] <= 0:
+                    gap_ends.add(b)  # the deficit stops here (or the window ends)
+                if not deepens:
+                    continue
+                # Just in time: online a few minutes before this deficit begins (or deepens).
+                s = max(a - lead, cand.earliest_start)
+                if s > cand.earliest_start and s + online < ctx.plan_end:
                     starts.add(s)
+        shortest = st.min_offer_minutes + cand.online_minutes
         for start in sorted(starts)[: max(1, st.max_start_options)]:
             lengths = set(st.duration_options_minutes)
+            if st.fit_lengths_to_gap:
+                lengths.add(shortest)
+                for end in gap_ends:
+                    fit = math.ceil((end - start).total_seconds() / 60)
+                    if fit > shortest:
+                        lengths.add(fit)  # end exactly when this gap ends
             if cand.latest_end is not None:
                 until_next = int((cand.latest_end - start).total_seconds() // 60)
                 if until_next <= max(st.duration_options_minutes):

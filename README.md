@@ -111,19 +111,21 @@ Phase 5 (load **workflow sample**; details in [docs/workflow.md §12](docs/workf
    Ridge goes from 90 to 0, the alert clears, routing sends SRG-C220 to Vale (scope
    SRG-H3 only), and the audit trail shows every step.
 
-UI: open http://localhost:3000/coordinator → **Dataset & simulation controls** →
-**Load staffing sample** (Phase 4 scenario), **Load surge sample** (Phase 3 scenario) or
-**Load dev sample** (Phase 2 replay scenario), or upload the judging ZIP.
+UI: open http://localhost:3000/coordinator → the dataset button in the page toolbar (it
+opens **Dataset & simulation controls** in a drawer) → **Load staffing sample** (Phase 4
+scenario), **Load surge sample** (Phase 3 scenario) or **Load dev sample** (Phase 2 replay
+scenario), or upload the judging ZIP. The **Advance +1m/+5m/+15m/+60m** buttons next to it
+move the simulation clock, which is always shown in the header.
 
-Phase 4, with the staffing sample loaded (**Recommendations** panel):
+Phase 4, with the staffing sample loaded (**Optimizer** tab at the bottom of the page):
 
 1. **Routing**: the stroke consult STF-C1 goes to Dr. Ada Staff, the only eligible
    physician. The waiting General Neuro consult goes to Dr. Di Staff, and the ringing call
    stays with Dr. Ed Staff. STF-C4 cannot be placed, and the panel says why (Bo on video,
    Cy ended a call 1 min ago). Open "Why this recommendation" for the evidence and costs.
 2. **Split shifts**: seven off-shift physicians × eight rules. Only Dr. Gil Staff passes.
-   CP-SAT proposes 17:45–21:45 EDT for Lakeside and Summit (deficit 195 → 60
-   physician-minutes over 240 min). Trap protection keeps him off busy Harbor.
+   CP-SAT proposes 17:35–21:00 EDT for Lakeside and Summit: online 10 minutes before the
+   gap, ending when it ends (deficit 195 → 60 physician-minutes over 240 min). Trap protection keeps him off busy Harbor.
 3. **Preview impact** opens **What-if**: current forecast vs "projected if accepted" for
    each hospital. Try Dr. Jo Staff to see the overlap rule reject the offer.
 4. **Compare**: optimizer vs least-loaded routing, a manual staffing heuristic, and
@@ -131,14 +133,15 @@ Phase 4, with the staffing sample loaded (**Recommendations** panel):
 
 Phase 3, with the surge sample:
 
-1. **Alert queue**: 15 ranked alerts. Select one to see the rule (brief or assumption),
-   evidence, severity, why it has that priority, and the suggested intervention category.
-2. **Hospital coverage**: pick Northgate. The chart shows the requirement dropping and the
+1. **Needs attention**: 15 ranked alerts. Select one to see the time against the standard
+   and the recommended next step; the rule (brief or assumption), why it has that
+   priority and the evidence are one click away.
+2. **Coverage forecast** tab: pick Northgate. The chart shows the requirement dropping and the
    shortfall from 19:00 to 19:15 EDT (two shifts end while the demand spike persists),
    then a night physician joining at 19:30 as uncertain coverage. "Why" lists every cause.
-3. **+15 min**: a consult that was ingested late becomes visible; the spike now lasts
+3. **Advance +15m**: a consult that was ingested late becomes visible; the spike now lasts
    until 19:25 and the gap grows to 25 physician-minutes, with no restart.
-4. **Inject events**: e.g. mark Dr. Reese Surge Temporarily Unavailable. Northgate goes
+4. **Inject events** (in the dataset drawer): e.g. mark Dr. Reese Surge Temporarily Unavailable. Northgate goes
    from a projected gap to a gap now.
 
 API equivalents:

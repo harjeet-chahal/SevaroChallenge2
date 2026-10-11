@@ -136,11 +136,18 @@ def _clock_start(
     if std.clock == "stage_entry":
         current = next((h for h in reversed(c.stage_history) if h.stage is c.stage), None)
         return c.stage_entered_at, current.event_id if current else None, None
-    pending = [h for h in c.stage_history if h.stage is ConsultStage.NOTE_PENDING]
+    # Only the current note phase counts: a provisional Note Pending from an earlier call that
+    # imaging or video later superseded must not start the clock.
+    phase = []
+    for h in reversed(c.stage_history):
+        if h.stage not in (ConsultStage.NOTE_PENDING, ConsultStage.DOCUMENTATION):
+            break
+        phase.append(h)
+    pending = [h for h in phase if h.stage is ConsultStage.NOTE_PENDING]
     if pending:
-        return pending[-1].entered_at, pending[-1].event_id, None
+        return pending[0].entered_at, pending[0].event_id, None
     caveat = "no end of video or call was recorded; measured from note start instead"
-    docs = [h for h in c.stage_history if h.stage is ConsultStage.DOCUMENTATION]
+    docs = [h for h in phase if h.stage is ConsultStage.DOCUMENTATION]
     if docs:
         return docs[-1].entered_at, docs[-1].event_id, caveat
     return c.stage_entered_at, None, caveat
@@ -194,8 +201,16 @@ def detect_stage_standards(ctx: DetectionContext) -> list[AlertDraft]:
         if not c.is_open:
             continue
         category = ctx.category(c.consult_type)
+        # Routed (rung, or a routing attempt failed) without a recorded triage event: the
+        # consult is waiting for a doctor all the same, timed from the first routing activity.
+        untriaged = (
+            c.stage is ConsultStage.RECEIVED
+            and c.assigned_physician_id is None
+            and c.routing_started_at is not None
+        )
         for std in ctx.config.stage_standards:
-            if c.stage not in std.stages:
+            waiting_untriaged = untriaged and std.code is RuleCode.STAGE_TRIAGED_UNASSIGNED
+            if c.stage not in std.stages and not waiting_untriaged:
                 continue
             if std.requires_unassigned and c.assigned_physician_id is not None:
                 continue
@@ -206,6 +221,13 @@ def detect_stage_standards(ctx: DetectionContext) -> list[AlertDraft]:
                 if category not in std.applies_to:
                     continue
             start, event_id, caveat = _clock_start(c, std)
+            if waiting_untriaged:
+                assert c.routing_started_at is not None
+                start, event_id = c.routing_started_at, None
+                caveat = (
+                    "no triage event was recorded; measured from the first routing activity "
+                    "(a ring or a failed routing attempt)"
+                )
             elapsed = (ctx.as_of - start).total_seconds()
             severity = _severity_for(elapsed, std)
             if severity is None:
@@ -238,6 +260,8 @@ def detect_stage_standards(ctx: DetectionContext) -> list[AlertDraft]:
             clock_text = (
                 "since the end of video or call"
                 if std.clock == "end_of_video_or_call"
+                else "since routing started (not triaged)"
+                if waiting_untriaged
                 else "in this stage"
             )
             drafts.append(
@@ -303,8 +327,6 @@ def detect_open_notes(ctx: DetectionContext) -> list[AlertDraft]:
     drafts: list[AlertDraft] = []
     window = timedelta(minutes=rule.window_minutes)
     for p in ctx.state.physicians:
-        if not p.on_shift:
-            continue
         notes = [
             c
             for c in ctx.state.consultations
@@ -315,14 +337,22 @@ def detect_open_notes(ctx: DetectionContext) -> list[AlertDraft]:
         if not notes:
             continue
         if p.scheduled_shift is None:
-            ctx.notes.append(
-                f"{p.display_name} has open notes but no known shift end; the open-notes-near-"
-                "shift-end standard was not evaluated."
-            )
+            if p.on_shift:
+                ctx.notes.append(
+                    f"{p.display_name} has open notes but no known shift end; the open-notes-"
+                    "near-shift-end standard was not evaluated."
+                )
             continue
         end = p.scheduled_shift.end
         remaining = end - ctx.as_of
-        if not (timedelta(0) < remaining <= window):
+        ended = remaining <= timedelta(0) and p.scheduled_shift.start < ctx.as_of
+        if ended:
+            # Assumption: notes still open after the shift has ended are at least as risky as
+            # notes open in its last hour, so the alert stays (critical) until they are done.
+            if not p.on_shift:
+                drafts.append(_notes_after_shift_end(ctx, p, notes, end))
+            continue
+        if not p.on_shift or not (timedelta(0) < remaining <= window):
             continue
         n = len(notes)
         if n >= rule.critical_min_open_notes:
@@ -385,6 +415,63 @@ def detect_open_notes(ctx: DetectionContext) -> list[AlertDraft]:
     return drafts
 
 
+def _notes_after_shift_end(
+    ctx: DetectionContext, p: PhysicianState, notes: list[ConsultationState], end: datetime
+) -> AlertDraft:
+    rule = ctx.config.open_notes
+    n = len(notes)
+    hospitals = sorted({c.hospital_id for c in notes if c.hospital_id})
+    tz = ctx.tz(hospitals[0]) if len(hospitals) == 1 else "UTC"
+    over = (ctx.as_of - end).total_seconds()
+    return AlertDraft(
+        alert_id=f"{RuleCode.OPEN_NOTES_NEAR_SHIFT_END.value}:physician:{p.physician_id}",
+        rule_code=RuleCode.OPEN_NOTES_NEAR_SHIFT_END,
+        rule_name="Open notes within 60 min of the physician's shift end",
+        rule_source="challenge_brief",
+        rule_reference=rule.reference,
+        category=AlertCategory.PHYSICIAN_WORKFLOW,
+        severity=Severity.CRITICAL,
+        severity_reason=(
+            f"{n} note(s) still open {fmt_duration(over)} after the shift ended (critical: the "
+            "shift is over; assumption beyond the brief's 60-min window)"
+        ),
+        title=f"{p.display_name}: {n} open note(s), shift ended {fmt_local(end, tz)}",
+        summary=(
+            f"{p.display_name}'s shift ended {fmt_duration(over)} ago with {n} unfinished "
+            f"note(s): {', '.join(c.consult_id for c in notes)}."
+        ),
+        action=RecommendedAction.CONTACT_PHYSICIAN,
+        action_reason=(
+            "Notes stay with their author: ask the physician to finish them, or escalate."
+        ),
+        category_rank=4,
+        category_reason="physician workflow risk at shift end",
+        urgency=n + 1,
+        urgency_reason=f"{n} open note(s); shift ended {over / 60:.0f} min ago",
+        affected=n,
+        hospital_id=hospitals[0] if len(hospitals) == 1 else None,
+        physician_id=p.physician_id,
+        condition_since=end - timedelta(minutes=rule.window_minutes),
+        elapsed_seconds=int(over),
+        evidence=[
+            AlertEvidence(label="Shift ended", value=fmt_local(end, tz), at=end),
+            *[
+                AlertEvidence(
+                    label=f"Open note {c.consult_id}",
+                    value=f"{STAGE_LABELS[c.stage]} at {ctx.hospital_name(c.hospital_id)} "
+                    f"since {fmt_local(c.stage_entered_at, ctx.tz(c.hospital_id))}",
+                    at=c.stage_entered_at,
+                )
+                for c in notes
+            ],
+        ],
+        assumptions=[
+            "The brief's standard covers the last hour of the shift; notes still open after "
+            "it ends stay flagged as critical (assumption)."
+        ],
+    )
+
+
 def detect_assigned_unavailable(ctx: DetectionContext) -> list[AlertDraft]:
     rule = ctx.config.assigned_unavailable
     drafts: list[AlertDraft] = []
@@ -392,19 +479,54 @@ def detect_assigned_unavailable(ctx: DetectionContext) -> list[AlertDraft]:
         if not c.is_open or not c.assigned_physician_id:
             continue
         p = ctx.physicians.get(c.assigned_physician_id)
-        if p is None or p.availability.value not in rule.unavailable_states:
+        if p is None:
+            continue
+        # A physician whose scheduled shift is over has left even if a call or video is still
+        # open (busy outranks off shift in availability). Only a session for this very consult
+        # means they are still working on it; open notes are covered by the open-notes rule.
+        shift_over = (
+            p.on_shift is False
+            and p.scheduled_shift is not None
+            and p.scheduled_shift.end <= ctx.as_of
+        )
+        in_session = any(
+            s.consult_id == c.consult_id
+            for s in [*p.signals.active_calls, *p.signals.active_videos]
+        )
+        unavailable = p.availability.value in rule.unavailable_states
+        if p.availability is not Availability.UNAVAILABLE and shift_over:
+            if in_session or c.stage in ctx.config.open_notes.note_stages:
+                continue
+            unavailable = True
+        if not unavailable:
             continue
         category = ctx.category(c.consult_type)
         critical = category in rule.critical_categories and c.stage in rule.critical_stages
         severity = Severity.CRITICAL if critical else rule.default_severity
         tz = ctx.tz(c.hospital_id)
-        if p.availability is Availability.OFF_SHIFT and p.scheduled_shift:
-            since = p.scheduled_shift.end
-            why = f"shift ended at {fmt_local(since, tz)}"
-        else:
+        since: datetime | None
+        if p.availability is Availability.UNAVAILABLE:
             since = p.signals.status_since
+            state_text = "Temporarily Unavailable"
             why = "self-reported Temporarily Unavailable" + (
                 f" since {fmt_local(since, tz)}" if since else ""
+            )
+        elif shift_over:
+            assert p.scheduled_shift is not None
+            since = p.scheduled_shift.end
+            state_text = "off shift"
+            why = f"shift ended at {fmt_local(since, tz)}" + (
+                f" (still {p.activity.value.replace('_', ' ')} on another session)"
+                if p.availability is Availability.BUSY
+                else ""
+            )
+        else:
+            since = None
+            state_text = "off shift"
+            why = "not on shift" + (
+                f" (next shift starts {fmt_local(p.next_shift_starts_at, tz)})"
+                if p.next_shift_starts_at and p.next_shift_starts_at > ctx.as_of
+                else ""
             )
         elapsed = (ctx.as_of - since).total_seconds() if since else None
         drafts.append(
@@ -423,10 +545,9 @@ def detect_assigned_unavailable(ctx: DetectionContext) -> list[AlertDraft]:
                 severity=severity,
                 severity_reason=(
                     f"{'stroke consult in an active clinical stage' if critical else 'consult'} "
-                    f"assigned to a physician who is {p.availability.value.replace('_', ' ')}"
+                    f"assigned to a physician who is {state_text}"
                 ),
-                title=f"{c.consult_id}: assigned to {p.display_name}, who is "
-                f"{p.availability.value.replace('_', ' ')}",
+                title=f"{c.consult_id}: assigned to {p.display_name}, who is {state_text}",
                 summary=(
                     f"{c.consult_type or 'Consult'} at {ctx.hospital_name(c.hospital_id)} "
                     f"({STAGE_LABELS[c.stage].lower()}) is assigned to {p.display_name}: {why}."
@@ -534,7 +655,8 @@ def detect_routing_failures(ctx: DetectionContext) -> list[AlertDraft]:
                 affected=1,
                 hospital_id=c.hospital_id,
                 consult_id=c.consult_id,
-                condition_since=c.last_routing_failure_at,
+                # Failing since routing first started, not since the latest retry.
+                condition_since=c.routing_started_at or c.last_routing_failure_at,
                 evidence=[
                     AlertEvidence(label="Credentialed physicians on shift now", value=pool_text),
                     *_consult_evidence(ctx, c),
@@ -550,6 +672,9 @@ def detect_signals(ctx: DetectionContext) -> list[AlertDraft]:
         if not p.on_shift:
             continue
         codes = {f.code: f for f in p.flags}
+        if "agent_offline" in codes and "availability_unverified" not in codes:
+            # Busy now (Synapse session), but the helper app is quiet all the same.
+            codes["availability_unverified"] = codes["agent_offline"]
         checks = (
             (
                 "external_video_suspected",
@@ -567,7 +692,10 @@ def detect_signals(ctx: DetectionContext) -> list[AlertDraft]:
                 "Desktop agent offline — availability unverified",
                 p.signals.agent_status_since,
                 RecommendedAction.CONTACT_PHYSICIAN,
-                "Routing assumes available; confirm before relying on it.",
+                "Routing assumes available; confirm before relying on it."
+                if p.availability is Availability.AVAILABLE
+                else "Busy now, but once this session ends availability can't be verified; "
+                "confirm the helper app is running.",
             ),
         )
         for flag, code, rule, name, since, action, action_reason in checks:
@@ -737,7 +865,9 @@ def detect_coverage(ctx: DetectionContext) -> list[AlertDraft]:
                     urgency_reason=f"{m.deficit_physician_minutes:g} physician-minutes of deficit",
                     affected=max(1, len(open_ids)),
                     hospital_id=hc.hospital_id,
-                    condition_since=ctx.as_of,
+                    # The forecast looks forward from now, so when this gap began is unknown;
+                    # don't claim it began now.
+                    condition_since=None,
                     impact_at=ctx.as_of,
                     minutes_to_impact=0.0,
                     evidence=evidence,
@@ -794,10 +924,67 @@ DETECTORS = (
 )
 
 
+def _who_could_take(
+    ctx: DetectionContext, c: ConsultationState
+) -> tuple[list[PhysicianState], list[str]]:
+    """(physicians free to take the consult now, why each other credentialed one is not).
+    Approximates routing rules 1-2: on shift, credentialed at the hospital, not the current
+    assignee, available (not busy or Temporarily Unavailable) and not ringing for another
+    call. The 2-minute post-call cooldown is left out: it clears within minutes."""
+    free: list[PhysicianState] = []
+    blocked: list[str] = []
+    for p in sorted(ctx.state.physicians, key=lambda x: x.physician_id):
+        if p.physician_id == c.assigned_physician_id or not p.on_shift:
+            continue
+        if c.hospital_id not in p.credentialed_hospital_ids:
+            continue
+        if p.minutes_to_shift_end is not None and p.minutes_to_shift_end <= 0:
+            continue
+        ringing = [s.consult_id or s.event_id for s in p.signals.ringing]
+        ringing = [r for r in ringing if r != c.consult_id]
+        if p.availability is Availability.UNAVAILABLE:
+            blocked.append(f"{p.display_name} (Temporarily Unavailable)")
+        elif p.availability is not Availability.AVAILABLE:
+            blocked.append(f"{p.display_name} ({p.activity.value.replace('_', ' ')})")
+        elif ringing:
+            blocked.append(f"{p.display_name} (phone ringing for {', '.join(ringing)})")
+        else:
+            free.append(p)
+    return free, blocked
+
+
+def _feasible_actions(ctx: DetectionContext, drafts: list[AlertDraft]) -> None:
+    """Never recommend a reassignment nobody can take: escalate instead, and say why."""
+    consults = {c.consult_id: c for c in ctx.state.consultations}
+    for d in drafts:
+        if d.action is not RecommendedAction.REASSIGN_CONSULT or d.consult_id is None:
+            continue
+        c = consults.get(d.consult_id)
+        if c is None:
+            continue
+        free, blocked = _who_could_take(ctx, c)
+        hospital = ctx.hospital_name(c.hospital_id)
+        if free:
+            d.action_reason += (
+                f" Free to take it now at {hospital}: "
+                + ", ".join(p.display_name for p in free)
+                + "."
+            )
+            continue
+        d.action = RecommendedAction.ESCALATE
+        d.action_reason = (
+            f"A reassignment is not possible now: no other credentialed physician at {hospital} "
+            "is free"
+            + (f" ({'; '.join(blocked)})" if blocked else " (none is on shift)")
+            + ". Escalate to the clinical lead."
+        )
+
+
 def detect_all(ctx: DetectionContext) -> list[AlertDraft]:
     drafts: list[AlertDraft] = []
     for detector in DETECTORS:
         drafts.extend(detector(ctx))
+    _feasible_actions(ctx, drafts)
     return drafts
 
 

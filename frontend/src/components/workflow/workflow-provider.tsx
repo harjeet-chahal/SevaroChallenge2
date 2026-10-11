@@ -20,6 +20,8 @@ export interface ComposerRequest {
   physicianIds?: string[];
   hospitalIds?: string[];
   consultId?: string | null;
+  /** Reassignment target; omitted = the routing optimizer's current pick for the consult. */
+  targetPhysicianId?: string | null;
   /** Changes on every "open" so re-opening re-runs the server preview. */
   nonce: number;
 }
@@ -34,6 +36,9 @@ interface WorkflowContextValue {
   composer: ComposerRequest | null;
   openComposer: (request: Omit<ComposerRequest, "nonce">) => void;
   closeComposer: () => void;
+  /** Confirmation of the last submitted proposal, shown where the intervention now lives. */
+  notice: string | null;
+  setNotice: (notice: string | null) => void;
 }
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null);
@@ -57,14 +62,11 @@ export function WorkflowProvider({
   const interventions = useKeyedResource(versionKey, (signal) => workflowApi.list(role, signal));
   const [selectedId, select] = useState<string | null>(null);
   const [composer, setComposer] = useState<ComposerRequest | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
+  // The composer opens as a drawer over the page, so the alert stays in view behind it.
   const openComposer = useCallback((request: Omit<ComposerRequest, "nonce">) => {
     setComposer({ ...request, nonce: Date.now() });
-    requestAnimationFrame(() =>
-      document
-        .getElementById("intervention-composer")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
   }, []);
 
   return (
@@ -78,6 +80,8 @@ export function WorkflowProvider({
         composer,
         openComposer,
         closeComposer: () => setComposer(null),
+        notice,
+        setNotice,
       }}
     >
       {children}
@@ -103,6 +107,22 @@ export const ACTION_INTERVENTION_TYPES: Partial<Record<RecommendedAction, Interv
   reassign_consult: "reassign_consult",
 };
 
+const GAP_RULES = ["COVERAGE_GAP_NOW", "COVERAGE_GAP_PROJECTED"];
+
+/**
+ * Same problem as the backend's ``same_problem``: identical alert ids, or a hospital's
+ * projected and current coverage-gap alerts (the id changes when the projected gap begins).
+ */
+function sameProblem(a: string | null, b: string): boolean {
+  if (a === null) return false;
+  if (a === b) return true;
+  const [ruleA, ...entityA] = a.split(":");
+  const [ruleB, ...entityB] = b.split(":");
+  return (
+    GAP_RULES.includes(ruleA) && GAP_RULES.includes(ruleB) && entityA.join(":") === entityB.join(":")
+  );
+}
+
 /**
  * Interventions raised about an alert's problem, newest first: from that alert, or from
  * another alert about the same consult (e.g. its routing-failure alert). Alerts come from
@@ -117,7 +137,7 @@ export function useAlertInterventions(): (
       (items ?? [])
         .filter(
           (i) =>
-            i.problem.alert_id === alert.alert_id ||
+            sameProblem(i.problem.alert_id, alert.alert_id) ||
             (alert.consult_id !== null && i.problem.consult_id === alert.consult_id),
         )
         .sort((a, b) => b.proposed_at.localeCompare(a.proposed_at)),

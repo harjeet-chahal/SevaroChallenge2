@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, Request, status
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.schemas.common import ActorRef, UserRole
+from app.schemas.common import ActorRef, EntityId, UserRole
 from app.services.analysis import AnalysisCache
+
+_entity_id: TypeAdapter[str] = TypeAdapter(EntityId)
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -57,7 +60,19 @@ def get_demo_actor(
             status_code=401,
             details={"allowed": [r.value for r in UserRole if r is not UserRole.SYSTEM]},
         ) from exc
-    return ActorRef(role=role, actor_id=x_demo_actor_id)
+    actor_id = None
+    if x_demo_actor_id is not None:  # absent is fine; present must be a usable ID
+        try:
+            actor_id = _entity_id.validate_python(x_demo_actor_id)
+        except ValidationError as exc:
+            raise AppError(
+                "X-Demo-Actor-Id must be a non-blank ID of at most 128 characters "
+                "(omit the header to act without an ID)",
+                code="actor_id_invalid",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                details={"header": "X-Demo-Actor-Id", "length": len(x_demo_actor_id)},
+            ) from exc
+    return ActorRef(role=role, actor_id=actor_id)
 
 
 def get_analysis_cache(request: Request) -> AnalysisCache:

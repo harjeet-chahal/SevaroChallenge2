@@ -466,6 +466,7 @@ export interface Alert {
   rank: {
     severity_rank: number;
     category_rank: number;
+    repeat_requests: number;
     urgency: number;
     coverage_risk: number;
     affected: number;

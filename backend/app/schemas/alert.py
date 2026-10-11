@@ -68,6 +68,9 @@ class AlertRank(ApiModel):
     """critical=0, warning=1, info=2 — hard precedence."""
     category_rank: int
     """Clinical-urgency class; stroke consult delays outrank everything else at equal severity."""
+    repeat_requests: int = 0
+    """Times the hospital called again about this consult (same patient): moves it up within
+    its severity and category."""
     urgency: float
     """Higher is more urgent: overrun ratio, imminence, or deficit size depending on the rule."""
     coverage_risk: int

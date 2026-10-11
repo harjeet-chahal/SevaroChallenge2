@@ -23,7 +23,7 @@ import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -45,6 +45,7 @@ from app.engines.interventions import (
     split_shift_status_from_offers,
 )
 from app.engines.optimization import ForecastConfig, simulate_intervention
+from app.engines.optimization.routing.problem import network_timezone
 from app.engines.optimization.split_shift import (
     Candidate,
     Option,
@@ -54,12 +55,14 @@ from app.engines.optimization.split_shift import (
     offer_checks,
     proposed_window,
     protection_for,
+    seed_count,
+    seed_peers,
     trap_analysis,
 )
 from app.engines.timeline import fmt_local
 from app.repositories import EventRepository, ReferenceRepository, SystemRepository
 from app.repositories.workflow import WorkflowRepository
-from app.schemas.alert import Alert
+from app.schemas.alert import Alert, RuleCode
 from app.schemas.audit import AuditEntry, AuditPage
 from app.schemas.common import ActorRef, UserRole
 from app.schemas.event import EventSource, KnownEventType
@@ -153,6 +156,59 @@ def with_default_identity(actor: ActorRef) -> ActorRef:
         UserRole.CLINICAL_LEAD: "demo-clinical-lead",
     }.get(actor.role)
     return actor.model_copy(update={"actor_id": default}) if default else actor
+
+
+GAP_RULES = {RuleCode.COVERAGE_GAP_NOW.value, RuleCode.COVERAGE_GAP_PROJECTED.value}
+
+
+MAX_SWEEP_PASSES = 5
+"""An offer moves at most sent -> accepted -> active -> completed, so a few passes suffice."""
+
+
+def same_problem(a: str, b: str) -> bool:
+    """Alert ids that name the same problem: identical, or a hospital's projected and
+    current coverage-gap alerts (the id changes when the projected gap begins)."""
+    if a == b:
+        return True
+    rule_a, _, entity_a = a.partition(":")
+    rule_b, _, entity_b = b.partition(":")
+    return rule_a in GAP_RULES and rule_b in GAP_RULES and entity_a == entity_b
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def slide_to_now(item: dict[str, Any], now: datetime) -> tuple[dict[str, Any], str | None]:
+    """A planned offer whose start has passed (approval or sending came later) starts now
+    instead and still ends as planned; every rule is re-checked on the result. Returns the
+    item unchanged (and no note) when its start has not passed."""
+    start = datetime.fromisoformat(item["start_at"])
+    if start >= now:
+        return item, None
+    end = datetime.fromisoformat(item["end_at"])
+    minutes = max(0, int((end - now).total_seconds() // 60))
+    moved = end - timedelta(minutes=minutes)  # whole minutes, still ending as planned
+    online = moved + timedelta(minutes=item["minutes_to_online"])
+    note = (
+        f"{item['display_name']}'s offer was to start {_iso(start)}, which has passed: it now "
+        f"starts {_iso(moved)} ({minutes} min) and still ends {_iso(end)}."
+    )
+    return {
+        **item,
+        "start_at": _iso(moved),
+        "duration_minutes": minutes,
+        "expected_online_at": _iso(online),
+        "coverage_minutes": minutes - item["minutes_to_online"],
+    }, note
+
+
+def offer_window(o: OfferRecord, now: datetime) -> tuple[datetime, datetime]:
+    """When an offer's physician would be (or is) counted: from going online to the end."""
+    online = o.activated_at or o.expected_online_at
+    if online is None:
+        online = max(o.start_at, now) + timedelta(minutes=o.minutes_to_online)
+    return online, o.end_at
 
 
 def deficit_between(model: HospitalCoverageModel, start: datetime, end: datetime) -> float:
@@ -293,7 +349,26 @@ class WorkflowService:
             completed_offer_ids=[],
         )
         touched: set[str] = set()
-        for at, kind, offer in self._due(now):
+        # Several steps can fall inside one clock move (e.g. activation, then the shift's
+        # end): apply them pass by pass, each at its own simulated time, until none is due.
+        for _ in range(MAX_SWEEP_PASSES):
+            due = self._due(now)
+            if not due:
+                break
+            self._apply_due(due, result, touched)
+            for iid in sorted(touched):
+                rec = self.repo.get_intervention(iid)
+                if rec is not None:
+                    self._sync_split_status(rec, now, SYSTEM_ACTOR)
+        return result
+
+    def _apply_due(
+        self,
+        due: list[tuple[datetime, str, OfferRecord]],
+        result: ExpireResult,
+        touched: set[str],
+    ) -> None:
+        for at, kind, offer in due:
             touched.add(offer.intervention_id)
             if kind == "expire":
                 transition_offer(
@@ -343,11 +418,6 @@ class WorkflowService:
                 )
                 bump_data_version(self.session)
                 result.completed_offer_ids.append(offer.id)
-        for iid in sorted(touched):
-            rec = self.repo.get_intervention(iid)
-            if rec is not None:
-                self._sync_split_status(rec, now, SYSTEM_ACTOR)
-        return result
 
     # ------------------------------------------------------------- proposals --
 
@@ -497,7 +567,11 @@ class WorkflowService:
             for rec in self.repo.list_interventions(
                 import_id=self._import_id(), types=[body.type.value]
             ):
-                if rec.alert_id == alert.alert_id and S(rec.status) not in TERMINAL_STATUSES:
+                if (
+                    rec.alert_id
+                    and same_problem(rec.alert_id, alert.alert_id)
+                    and S(rec.status) not in TERMINAL_STATUSES
+                ):
                     draft.blocking.append(
                         f"This alert already has an open {body.type.value.replace('_', ' ')} "
                         f"({rec.id}, {rec.status.replace('_', ' ')})."
@@ -817,6 +891,28 @@ class WorkflowService:
             )
             if index == 0:
                 primary_option, primary_cand = option, cand
+
+        if primary_option is not None and primary_cand is not None and gap_need:
+            remaining = self._need_during(
+                primary_option.hospitals,
+                primary_option.start,
+                primary_option.end,
+                ctx.as_of,
+                primary_cand.online_minutes,
+            )
+            if remaining <= 0:
+                accepted = [
+                    o
+                    for o in self.repo.offers_with_status([O.ACCEPTED, O.ACTIVE])
+                    if set(o.routing_scope or o.hospital_ids) & set(primary_option.hospitals)
+                ]
+                who = ", ".join(o.display_name for o in accepted)
+                blocking.append(
+                    f"Coverage at {', '.join(names.get(h, h) for h in primary_option.hospitals)} "
+                    "during this shift is already secured"
+                    + (f" by accepted split shift(s) ({who})" if who else "")
+                    + ": it would not cover any remaining deficit."
+                )
 
         open_plans = [
             rec
@@ -1145,6 +1241,11 @@ class WorkflowService:
         )
         if alert is None and consult_id is None and not hospital_ids:
             blocking.append("Choose the alert, consult or hospital to escalate.")
+        unknown = [h for h in hospital_ids if h not in names]
+        if unknown:
+            blocking.append(f"Unknown hospital(s): {', '.join(unknown)}.")
+        if consult_id and not any(c.consult_id == consult_id for c in analysis.state.consultations):
+            blocking.append(f"Unknown consult {consult_id}.")
         facts: list[str] = []
         if alert is not None:
             facts.append(alert.recommended_action_reason)
@@ -1275,7 +1376,7 @@ class WorkflowService:
                     details={"note": body.note},
                 )
             else:
-                lines, problems, need_gone = self._revalidate(rec, now)
+                lines, problems, need_gone, plan = self._revalidate(rec, now)
                 if need_gone:
                     transition_intervention(
                         self.session,
@@ -1315,6 +1416,8 @@ class WorkflowService:
                         details={"problems": problems, "revalidation": lines},
                     )
                 else:
+                    if plan != rec.offer_plan:
+                        rec.offer_plan = plan  # starts that had passed now start now
                     self._store_approval(rec, "approve", actor, now, body.note, lines)
                     transition_intervention(
                         self.session,
@@ -1366,8 +1469,10 @@ class WorkflowService:
 
     def _revalidate(
         self, rec: InterventionRecord, now: datetime
-    ) -> tuple[list[str], list[str], str | None]:
-        """(what was checked, blocking problems, reason the need disappeared)."""
+    ) -> tuple[list[str], list[str], str | None, list[dict[str, Any]]]:
+        """(what was checked, blocking problems, reason the need disappeared, the offer plan
+        as it would be approved: a start that has passed moves to now)."""
+        plan = list(rec.offer_plan or [])
         analysis = self._analysis()
         lines = [
             f"Re-checked at simulation time {now.isoformat()} against data version "
@@ -1375,10 +1480,12 @@ class WorkflowService:
         ]
         kind = T(rec.type)
         if kind is T.ESCALATION:
-            if rec.alert_id and not any(a.alert_id == rec.alert_id for a in analysis.alerts.alerts):
-                return lines, [], f"alert {rec.alert_id} is no longer active."
+            if rec.alert_id and not any(
+                same_problem(a.alert_id, rec.alert_id) for a in analysis.alerts.alerts
+            ):
+                return lines, [], f"alert {rec.alert_id} is no longer active.", plan
             lines.append("The escalated problem is still active.")
-            return lines, [], None
+            return lines, [], None, plan
         staffing, internals = self.optimizer.staffing_with_internals(analysis)
         ctx = internals.ctx
         cands = {c.physician_id: c for c in internals.candidates}
@@ -1390,24 +1497,32 @@ class WorkflowService:
                 [],
                 f"no coverage gap remains at {', '.join(names.get(h, h) for h in need)} in the "
                 f"next {ctx.lookahead_minutes} min (counting accepted shifts).",
+                plan,
             )
         lines.append(
             f"Coverage need still present at "
             f"{', '.join(names.get(h, h) for h in need if h in ctx.gap_hospitals)}."
         )
+        if rec.offer_plan and all(self._plan_need(i, now) <= 0 for i in rec.offer_plan):
+            holders = ", ".join(o.display_name for o in self._binding_for_need(rec))
+            return (
+                lines,
+                [],
+                "the planned shift(s) would no longer cover any deficit: coverage during that "
+                f"time is already secured{f' ({holders})' if holders else ''}.",
+                plan,
+            )
         problems: list[str] = []
-        for item in rec.offer_plan:
+        for index, original in enumerate(rec.offer_plan):
+            item, moved = slide_to_now(original, now)
+            plan[index] = item
+            if moved:
+                lines.append(moved)
             pid, name = item["physician_id"], item["display_name"]
             start = datetime.fromisoformat(item["start_at"])
             cand = cands.get(pid)
             if cand is None:
                 problems.append(f"{name} is no longer on the off-shift roster.")
-                continue
-            if start < now:
-                problems.append(
-                    f"{name}'s offer was to start "
-                    f"{fmt_local(start, ctx.tz_for(item['hospital_ids']))}, which has passed."
-                )
                 continue
             checks = offer_checks(
                 cand.state,
@@ -1427,7 +1542,7 @@ class WorkflowService:
                     f"{name}: all {len(checks)} split-shift rules pass for this offer "
                     "(including ≤ 1 open offer and ≤ 3 per rolling 7 days from the offer log)."
                 )
-        return lines, problems, None
+        return lines, problems, None, plan
 
     # ------------------------------------------------------------------ offers --
 
@@ -1477,12 +1592,37 @@ class WorkflowService:
             )
             sent: list[OfferRecord] = []
             skipped: list[str] = []
-            for item in rec.offer_plan:
+            unneeded = 0
+            plan = list(rec.offer_plan)
+            for index, original in enumerate(rec.offer_plan):
+                item, moved = slide_to_now(original, now)
+                if moved:
+                    plan[index] = item
+                    write_audit(
+                        self.session,
+                        at=now,
+                        actor=actor,
+                        action="offer_start_moved",
+                        summary=moved,
+                        entity_type="intervention",
+                        entity_id=rec.id,
+                        intervention_id=rec.id,
+                        details={"physician_id": item["physician_id"]},
+                    )
                 pid, name = item["physician_id"], item["display_name"]
                 start = datetime.fromisoformat(item["start_at"])
                 end = datetime.fromisoformat(item["end_at"])
                 problems = []
-                open_, committed, week = self.repo.offer_counts(pid, now, self.policy.week_window)
+                if self._plan_need(item, now) <= 0:
+                    # Stop asking once the gap is filled, also for offers not sent yet.
+                    unneeded += 1
+                    problems.append(
+                        "coverage during this shift is already secured (no remaining deficit "
+                        "while it would run)"
+                    )
+                open_, committed, week = self.repo.offer_counts(
+                    pid, now, self.policy.week_window, self._import_id()
+                )
                 if open_ >= self.policy.max_open_offers_per_physician:
                     problems.append("already has an open offer (limit 1)")
                 if committed:
@@ -1605,6 +1745,8 @@ class WorkflowService:
                     },
                 )
                 sent.append(offer)
+            if plan != rec.offer_plan:
+                rec.offer_plan = plan
             if sent:
                 transition_intervention(
                     self.session,
@@ -1617,6 +1759,24 @@ class WorkflowService:
                     + (f"; not sent: {'; '.join(skipped)}" if skipped else "."),
                     details={"offer_ids": [o.id for o in sent], "not_sent": skipped},
                 )
+            elif rec.offer_plan and unneeded == len(rec.offer_plan):
+                why = "coverage during the planned shift(s) is already secured"
+                transition_intervention(
+                    self.session,
+                    rec,
+                    S.NO_LONGER_REQUIRED,
+                    at=now,
+                    actor=actor,
+                    action="intervention_no_longer_required",
+                    summary=f"{rec.id} is no longer required: {why}. No offer was sent.",
+                    reason=why,
+                    details={"not_sent": skipped},
+                )
+                deferred = ConflictError(
+                    f"No offer sent: {why}. The request was closed as no longer required.",
+                    code="no_longer_required",
+                    details={"problems": skipped},
+                )
             else:
                 deferred = ConflictError(
                     "No offer could be sent: " + " ".join(skipped),
@@ -1627,18 +1787,45 @@ class WorkflowService:
             raise deferred
         return self.get(intervention_id, actor)
 
-    def _remaining_need(self, offer: OfferRecord, now: datetime) -> float:
-        """Forecast deficit at the offer's hospitals during the time it would cover,
-        counting every other accepted or active split shift (workflow overlay)."""
+    def _need_during(
+        self,
+        hospitals: Sequence[str],
+        start: datetime,
+        end: datetime,
+        now: datetime,
+        minutes_to_online: int,
+    ) -> float:
+        """Forecast deficit physician-minutes at ``hospitals`` during the time a shift
+        [start, end) would cover once online, counting every accepted or active split shift
+        (workflow overlay)."""
         analysis = self._analysis()
         ctx = build_planning_context(analysis, self.optimizer.config())
-        start = max(offer.start_at, now) + timedelta(minutes=offer.minutes_to_online)
+        begin = max(start, now) + timedelta(minutes=minutes_to_online)
         total = 0.0
-        for hid in offer.routing_scope or offer.hospital_ids:
+        for hid in hospitals:
             model = ctx.models.get(hid)
             if model is not None:
-                total += deficit_between(model, start, offer.end_at)
+                total += deficit_between(model, begin, end)
         return round(total, 4)
+
+    def _remaining_need(self, offer: OfferRecord, now: datetime) -> float:
+        return self._need_during(
+            offer.routing_scope or offer.hospital_ids,
+            offer.start_at,
+            offer.end_at,
+            now,
+            offer.minutes_to_online,
+        )
+
+    def _plan_need(self, item: dict[str, Any], now: datetime) -> float:
+        """Remaining need during one planned (not yet sent) offer."""
+        return self._need_during(
+            item.get("routing_scope_hospital_ids") or item["hospital_ids"],
+            datetime.fromisoformat(item["start_at"]),
+            datetime.fromisoformat(item["end_at"]),
+            now,
+            item["minutes_to_online"],
+        )
 
     def respond(
         self, offer_id: str, body: OfferResponseRequest, actor: ActorRef
@@ -1659,6 +1846,16 @@ class WorkflowService:
                 raise NotFoundError(f"Offer {offer_id} not found")
             now = self._now()
             status = O(offer.status)
+            if now < offer.sent_at:
+                # The clock was moved back (Reset / Set time) to before the offer was sent: at
+                # this simulated time it does not exist yet, so it cannot be answered.
+                raise ConflictError(
+                    f"At the current simulation time ({now.isoformat()}) offer {offer.id} has "
+                    f"not been sent yet (sent {offer.sent_at.isoformat()}). Move the clock "
+                    "forward to answer it.",
+                    code="offer_not_sent_yet",
+                    details={"sent_at": offer.sent_at, "simulation_time": now},
+                )
             seconds = int((now - offer.sent_at).total_seconds())
 
             def record(result: str, detail: str | None = None) -> None:
@@ -1804,7 +2001,9 @@ class WorkflowService:
 
     def _accept(self, offer, now, actor, seconds, record) -> tuple[str, str]:
         rec = self._record(offer.intervention_id)
-        binding = self._binding_for_need(rec, exclude_offer_id=offer.id)
+        binding = self._binding_for_need(
+            rec, exclude_offer_id=offer.id, window=offer_window(offer, now)
+        )
         quota_full = len(binding) >= rec.required_physicians
         remaining = None
         if not quota_full and self.policy.require_remaining_need_on_accept:
@@ -1862,6 +2061,7 @@ class WorkflowService:
                 offer_id=offer.id,
                 details={"policy": "first binding acceptance wins"},
             )
+            self._sync_split_status(rec, now, actor)
             return (
                 "redundant",
                 "Thank you — your acceptance was recorded, but coverage had already been "
@@ -1900,12 +2100,19 @@ class WorkflowService:
         )
 
     def _binding_for_need(
-        self, rec: InterventionRecord, *, exclude_offer_id: str | None = None
+        self,
+        rec: InterventionRecord,
+        *,
+        exclude_offer_id: str | None = None,
+        window: tuple[datetime, datetime] | None = None,
     ) -> list[OfferRecord]:
         """Accepted or active split shifts that already serve this request's need: its own,
         and those of other open requests for overlapping hospitals (the same shortage can be
-        targeted by two requests; it must not be filled twice)."""
+        targeted by two requests; it must not be filled twice). With ``window``, only shifts
+        that cover at least half of it count: a shift ending soon (or a short handover) does
+        not fill a later gap."""
         need = set(rec.hospital_ids)
+        now = self._now()
         found: list[OfferRecord] = []
         for other in self.repo.list_interventions(
             import_id=rec.dataset_import_id, types=[T.SPLIT_SHIFT.value]
@@ -1918,6 +2125,11 @@ class WorkflowService:
                     and O(o.status) in (O.ACCEPTED, O.ACTIVE)
                     and set(o.routing_scope or o.hospital_ids) & need
                 ):
+                    if window is not None:
+                        start, end = offer_window(o, now)
+                        overlap = min(end, window[1]) - max(start, window[0])
+                        if overlap * 2 < window[1] - window[0]:
+                            continue
                     found.append(o)
         return found
 
@@ -1929,7 +2141,7 @@ class WorkflowService:
             rec = self.repo.get_intervention(offer.intervention_id)
             if rec is None or rec.dataset_import_id != self._import_id():
                 continue
-            binding = self._binding_for_need(rec)
+            binding = self._binding_for_need(rec, window=offer_window(offer, now))
             if len(binding) >= rec.required_physicians:
                 same = offer.intervention_id == secured_by.intervention_id
                 reason = (
@@ -1966,6 +2178,36 @@ class WorkflowService:
                 },
             )
             self._sync_split_status(rec, now, SYSTEM_ACTOR)
+        # Requests for the same hospitals that were proposed or approved but not sent yet:
+        # close them if none of their planned shifts would still cover a deficit.
+        secured = set(secured_by.routing_scope or secured_by.hospital_ids)
+        for other in self.repo.list_interventions(
+            import_id=self._import_id(), types=[T.SPLIT_SHIFT.value]
+        ):
+            if S(other.status) not in (S.PENDING_APPROVAL, S.APPROVED):
+                continue
+            if not set(other.hospital_ids) & secured or not other.offer_plan:
+                continue
+            if any(self._plan_need(item, now) > 0 for item in other.offer_plan):
+                continue
+            why = (
+                f"coverage during its planned shift(s) was secured through "
+                f"{secured_by.intervention_id} ({secured_by.display_name})"
+            )
+            transition_intervention(
+                self.session,
+                other,
+                S.NO_LONGER_REQUIRED,
+                at=now,
+                actor=SYSTEM_ACTOR,
+                action="intervention_no_longer_required",
+                summary=f"{other.id} closed before any offer was sent: {why}.",
+                reason=why,
+                details={
+                    "policy": "stop asking once the gap is filled",
+                    "secured_by_offer_id": secured_by.id,
+                },
+            )
 
     def _sync_split_status(self, rec: InterventionRecord, now: datetime, actor: ActorRef) -> None:
         if T(rec.type) is not T.SPLIT_SHIFT:
@@ -2023,10 +2265,50 @@ class WorkflowService:
                 )
         return self._shift_offer(self._offer(offer_id), self._now(), actor)
 
+    def _go_live_seed(
+        self, analysis: OperationalAnalysis, offer: OfferRecord, at: datetime
+    ) -> tuple[int, str]:
+        """Trap protection's seeded count, recalculated from the physicians working at the
+        routing-scope hospitals at go-live (the proposal only had an estimate: peers may have
+        left or started since)."""
+        moment = analysis.state.as_of
+        joiner = next(
+            (p for p in analysis.state.physicians if p.physician_id == offer.physician_id), None
+        )
+        peers, covering = seed_peers(
+            analysis.state.physicians,
+            analysis.coverage_models,
+            offer.physician_id,
+            offer.routing_scope,
+            moment,
+            self.optimizer.config().trap.seed_peer_overlap_minutes,
+        )
+        zone = self._hospital_zone(analysis, offer.routing_scope)
+        return seed_count(
+            self.optimizer.config(),
+            joiner.roster_role if joiner else None,
+            peers,
+            covering,
+            offer.routing_scope,
+            f"at go-live ({fmt_local(moment, zone)})",
+            joiner_start=offer.start_at,
+            tz=network_timezone(analysis.state.hospitals),
+        )
+
     def _activate(self, offer: OfferRecord, *, at: datetime, actor: ActorRef, source: str) -> None:
-        before = self._analysis()
+        # At the activation time itself: a big clock jump applies it later than it happened.
+        before = self.analyses.analysis(at)
+        proposed_seed = offer.seeded_consult_count
+        seed, seed_reason = self._go_live_seed(before, offer, at)
+        offer.seeded_consult_count = seed
         offer.activated_at = at
         offer.activation_source = source
+        changed = (
+            f" (estimated {proposed_seed} at proposal; recalculated from the physicians "
+            "working now)"
+            if seed != proposed_seed
+            else ""
+        )
         transition_offer(
             self.session,
             offer,
@@ -2036,11 +2318,17 @@ class WorkflowService:
             action="physician_activated",
             summary=f"{offer.display_name} is online ({source.replace('_', ' ')}) at "
             f"{at.isoformat()}; routable only at {', '.join(offer.routing_scope)} with a seeded "
-            f"routing count of {offer.seeded_consult_count}.",
-            details={"source": source, "routing_scope": offer.routing_scope},
+            f"routing count of {seed}{changed}.",
+            details={
+                "source": source,
+                "routing_scope": offer.routing_scope,
+                "seeded_consult_count": seed,
+                "seeded_consult_count_at_proposal": proposed_seed,
+                "seed_reason": seed_reason,
+            },
         )
         bump_data_version(self.session)
-        after = self._analysis()
+        after = self.analyses.analysis(at)
         impact = self._coverage_impact(
             before,
             offer.routing_scope,
@@ -2090,7 +2378,10 @@ class WorkflowService:
             if status is S.CANCELLED:
                 return self.get(intervention_id, actor)  # idempotent
             now = self._now()
-            reason = body.reason or f"cancelled by the {actor.role.value.replace('_', ' ')}"
+            by = f"cancelled by the {actor.role.value.replace('_', ' ')}"
+            # Staff free text stays in the audit log and on the request; the physician's phone
+            # only ever shows generated wording (it could mention a patient).
+            reason = body.reason or by
             staffing_changed = False
             for offer in self.repo.offers_for(rec.id):
                 current = O(offer.status)
@@ -2103,7 +2394,7 @@ class WorkflowService:
                         actor=actor,
                         action="offer_withdrawn",
                         summary=f"Offer {offer.id} to {offer.display_name} withdrawn: {reason}.",
-                        reason=f"the request was cancelled ({reason})",
+                        reason=f"the request was {by}",
                     )
                 elif current in (O.ACCEPTED, O.ACTIVE):
                     offer.ended_at = now
@@ -2116,7 +2407,7 @@ class WorkflowService:
                         action="split_shift_cancelled",
                         summary=f"{offer.display_name}'s split shift ({offer.id}) cancelled: "
                         f"{reason}.",
-                        reason=reason,
+                        reason=by,
                     )
                     staffing_changed = True
             if staffing_changed:
@@ -2138,13 +2429,35 @@ class WorkflowService:
         actor = with_default_identity(actor)
         offer = self._offer(offer_id)
         if O(offer.status) in (O.ACCEPTED, O.ACTIVE):
-            self.cancel(offer.intervention_id, body, actor)
+            # Ends this physician's shift only; other accepted shifts in the request stay.
+            with self._write():
+                self._sweep_locked()
+                offer = self._offer(offer_id)
+                if O(offer.status) in (O.ACCEPTED, O.ACTIVE):
+                    now = self._now()
+                    by = f"cancelled by the {actor.role.value.replace('_', ' ')}"
+                    offer.ended_at = now
+                    transition_offer(
+                        self.session,
+                        offer,
+                        O.CANCELLED,
+                        at=now,
+                        actor=actor,
+                        action="split_shift_cancelled",
+                        summary=f"{offer.display_name}'s split shift ({offer.id}) cancelled: "
+                        f"{body.reason or by}.",
+                        reason=by,  # shown on the physician's phone: never staff free text
+                        details={"note": body.reason} if body.reason else None,
+                    )
+                    bump_data_version(self.session)
+                    self._sync_split_status(self._record(offer.intervention_id), now, actor)
             return self._shift_offer(self._offer(offer_id), self._now(), actor)
         with self._write():
             self._sweep_locked()
             offer = self._offer(offer_id)
             now = self._now()
-            reason = body.reason or f"withdrawn by the {actor.role.value.replace('_', ' ')}"
+            by = f"withdrawn by the {actor.role.value.replace('_', ' ')}"
+            reason = body.reason or by
             transition_offer(
                 self.session,
                 offer,
@@ -2153,7 +2466,8 @@ class WorkflowService:
                 actor=actor,
                 action="offer_withdrawn",
                 summary=f"Offer {offer.id} to {offer.display_name} withdrawn: {reason}.",
-                reason=reason,
+                reason=by,  # shown on the physician's phone: never staff free text
+                details={"note": body.reason} if body.reason else None,
             )
             self._sync_split_status(self._record(offer.intervention_id), now, actor)
         return self._shift_offer(self._offer(offer_id), self._now(), actor)
@@ -2402,7 +2716,8 @@ class WorkflowService:
                 "production routing.",
             }
             notes.append(
-                "Trap view is recomputed from the activation time with the stored seeded count."
+                "Trap view is recomputed from the activation time with the seeded count set at "
+                "go-live."
             )
         return InterventionImpact(
             intervention_id=rec.id,

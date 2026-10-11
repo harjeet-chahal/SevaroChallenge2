@@ -12,12 +12,19 @@ from datetime import timedelta
 import pytest
 from opt_helpers import NOW, OptScenario, config, m, staffing
 
-from app.engines.optimization import ForecastConfig, OptimizationConfig, simulate_intervention
+from app.engines.optimization import (
+    ForecastConfig,
+    OptimizationConfig,
+    run_staffing,
+    simulate_intervention,
+)
 from app.engines.optimization.split_shift import (
+    Decline,
     build_planning_context,
     evaluate_candidates,
     generate_options,
     offer_checks,
+    seed_peers,
 )
 from app.schemas.whatif import AssignConsultAction, SplitShiftAction
 
@@ -30,6 +37,7 @@ RULES = [
     "no_overlap",
     "min_length",
     "notification_limits",
+    "not_declined",
 ]
 
 
@@ -55,7 +63,14 @@ def checks_at(s: OptScenario, pid: str, start, minutes: int) -> dict[str, bool]:
 
 def test_cpsat_finds_the_hand_computed_optimum():
     s = base().candidate("G", ["H1"])
-    result, internals = staffing(s)
+    # Online 10 min before the gap (the default login buffer), then exactly to the end of the
+    # window: +50 for 190 min, 10 min of excess.
+    buffered, _ = staffing(s)
+    (rec,) = buffered.recommendations
+    assert (rec.offer_start, rec.offer_minutes) == (m(50), 190)
+    assert buffered.totals.excess_physician_minutes == 10
+
+    result, internals = staffing(s, config(staffing={"login_buffer_minutes": 0}))
     (rec,) = result.recommendations
 
     # Cover exactly [+60, +240): start at +60 for 180 min. Starting now wastes 60 min of
@@ -131,6 +146,15 @@ def test_rest_is_measured_at_the_offered_start_to_the_second():
     assert checks_at(short, "G", NOW, 120)["rest_10h"] is False
     _, cands = ctx_for(short)
     assert cands["G"].eligibility.earliest_valid_start == m(1)  # 10 h reached at +1 s
+
+
+def test_a_long_time_to_come_online_fails_the_length_rule_not_the_rest_rule():
+    s = base().candidate("G", ["H1"], online=250)  # rested long ago; online after the window
+    _, cands = ctx_for(s)
+    row = cands["G"].eligibility
+
+    assert row.failed_rules == ["min_length"]
+    assert next(c for c in row.checks if c.code == "rest_10h").passed
 
 
 def test_weekly_hours_include_the_offered_hours():
@@ -247,10 +271,86 @@ def test_trap_protection_restricts_scope_and_seeds_the_count():
 
     assert rec.protection.routing_scope_hospital_ids == ["H1"]
     assert rec.protection.excluded_credentialed_hospital_ids == ["H3"]
-    assert rec.protection.seeded_consult_count == 4  # median of peers covering H1 (P1: 4)
+    # G comes online at +50 (10-min login buffer before the +60 gap); P1, H1's only other
+    # physician, leaves 10 min later and so doesn't count: the seed is the median of everyone
+    # else working then (P3: 8), not P1's 4.
+    assert rec.online_at == m(50)
+    assert rec.protection.seeded_consult_count == 8
     assert trap.unrestricted.routed_to_joiner_elsewhere > 0
     assert trap.protected.routed_to_joiner_elsewhere == 0
     assert trap.unrestricted.modeled_arrivals == trap.protected.modeled_arrivals == 8
+
+
+def test_trap_demonstration_includes_a_physician_whose_shift_starts_later():
+    # H1 needs 1. P1 leaves at +60; night physician N starts at +120. G needs 60 min to come
+    # online, so G covers H1 from +60, alone until N arrives.
+    s = base().doctor("N", ["H1"], start=m(120), end=m(720), role="night")
+    for hour in range(24):
+        s.baseline("H1", hour, 8.0)  # mean 4 consults/hour
+    s.candidate("G", ["H1"], online=60)
+    result, _ = staffing(s)
+    (rec,) = result.recommendations
+    protected = result.trap.protected
+
+    assert rec.online_at == m(60)
+    assert protected.unrouted == 0
+    # From +120 N (night, low volume, 0 consults) takes H1's modeled consults. Before, N was
+    # missing from the model and G received every one of them.
+    assert 0 < protected.routed_to_joiner < protected.modeled_arrivals
+
+
+def test_seed_counts_only_physicians_still_working_when_the_joiner_comes_online():
+    # H1 needs 2. P1 (4 consults) leaves at +60, when the gap starts; G comes online at +50
+    # (login buffer); P2 (2 consults) stays. The seed is P2's count, not the median with P1.
+    s = OptScenario().hospital("H1").requirement("H1", "00:00", "00:00", 2)
+    s.doctor("P1", ["H1"], end=m(60)).history("P1", "H1", 4, last_call_end=-40)
+    s.doctor("P2", ["H1"]).history("P2", "H1", 2, last_call_end=-50)
+    s.candidate("G", ["H1"])
+    (rec,) = staffing(s)[0].recommendations
+
+    assert rec.online_at == m(50)
+    assert rec.protection.seeded_consult_count == 2
+    assert "(Dr P2 2)" in rec.protection.rationale[0]
+
+
+def test_seed_peers_are_read_at_the_online_time():
+    s = base().history("P1", "H1", 4, last_call_end=-40)
+    s.doctor("N", ["H1"], start=m(30), end=m(600), role="night")
+    s.candidate("G", ["H1"])
+    ctx, _ = ctx_for(s)
+    people = ctx.analysis.state.physicians
+
+    early, covering = seed_peers(people, ctx.models, "G", ["H1"], m(10))
+    assert covering and [(p.physician_id, n) for p, n in early] == [("P1", 4)]
+    # At +90 P1 has left and N has started (0 consults: the shift had not begun at NOW).
+    later, covering = seed_peers(people, ctx.models, "G", ["H1"], m(90))
+    assert covering and [(p.physician_id, n) for p, n in later] == [("N", 0)]
+
+
+def test_a_decline_rules_the_physician_out_for_that_hospital_until_the_offer_ends():
+    s = base().hospital("H2").requirement("H2", "00:00", "00:00", 1)
+    s.doctor("P2", ["H2"], end=m(60)).candidate("G", ["H1", "H2"])
+    analysis = s.analyze(NOW)
+    cfg = OptimizationConfig()
+
+    def g(*declines: Decline):
+        result, _ = run_staffing(analysis, cfg, declines={"G": list(declines)})
+        (row,) = result.candidates
+        return row, result
+
+    row, _ = g(Decline("OFF-1", ("H1",), declined_at=m(-5), until=m(120)))
+    assert row.eligible and row.gap_hospital_ids == ["H2"]  # still askable for H2
+
+    row, result = g(Decline("OFF-2", ("H1", "H2"), declined_at=m(-5), until=m(120)))
+    assert row.failed_rules == ["not_declined"] and result.recommendations == []
+    check = next(c for c in row.checks if c.code == "not_declined")
+    assert "OFF-2" in check.message and check.source == "implementation_choice"
+
+    # Once the declined offer would have ended, or for a decline recorded later, it is open.
+    row, _ = g(Decline("OFF-3", ("H1", "H2"), declined_at=m(-300), until=m(-1)))
+    assert row.eligible and row.gap_hospital_ids == ["H1", "H2"]
+    row, _ = g(Decline("OFF-4", ("H1", "H2"), declined_at=m(5), until=m(120)))
+    assert row.eligible
 
 
 # 19./20. What-if previews never touch real coverage ---------------------------------

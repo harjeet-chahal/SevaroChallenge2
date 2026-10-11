@@ -32,8 +32,12 @@ class RoutingPolicy(BaseModel):
     """... and 4 or fewer on nights."""
     night_role_labels: list[str] = Field(default_factory=lambda: ["night"])
     day_role_labels: list[str] = Field(default_factory=lambda: ["day"])
-    """ASSUMPTION: day/night is read from the roster role; unknown roles use the day threshold
-    (flagged as uncertainty)."""
+    """ASSUMPTION: day/night is read from the roster role. Without a day/night role (none on
+    the on-shift roster; "Float"), it is inferred from the shift start in the network's main
+    time zone (the zone most hospitals use): a start from ``night_shift_from_hour`` until
+    ``night_shift_until_hour`` is a night shift. No start known: day threshold, flagged."""
+    night_shift_from_hour: int = Field(default=17, ge=0, le=23)
+    night_shift_until_hour: int = Field(default=5, ge=0, le=23)
     routable_unassigned_stages: list[S] = Field(default_factory=lambda: [S.TRIAGED])
     """ASSUMPTION: routing starts after triage (the brief's first standard is "Triaged, not yet
     assigned"). Received-but-untriaged consults are listed as skipped, with the reason."""
@@ -87,6 +91,15 @@ class TrapPolicy(BaseModel):
     scope_when_no_gap: Literal["all_credentialed", "none"] = "all_credentialed"
     model_window_minutes: int = 120
     """Length of the modeled-arrival trap demonstration (uses baseline hourly means)."""
+    seed_peer_overlap_minutes: int = Field(default=30, ge=0)
+    """CHOICE: a peer counts toward the seeded count only if still working this long after
+    the joiner comes online (someone leaving minutes later does not share the calls)."""
+    overflow_outside_scope: bool = True
+    """CHOICE: the routing scope is not a wall. A consult at one of the joiner's other
+    credentialed hospitals may still go to them if it already has an alert of at least
+    ``overflow_min_severity`` (it is past a time limit). Such an edge costs more than any
+    regular edge, so the solver uses it only when no one else can take the consult."""
+    overflow_min_severity: Literal["warning", "critical"] = "warning"
 
 
 class StaffingPolicy(BaseModel):
@@ -106,6 +119,13 @@ class StaffingPolicy(BaseModel):
     """ASSUMPTION: when time-to-online is missing, assume this (flagged) rather than zero."""
     duration_options_minutes: list[int] = Field(default_factory=lambda: [120, 180, 240, 360])
     """CHOICE: finite offer lengths for CP-SAT (all >= the 2-hour minimum)."""
+    fit_lengths_to_gap: bool = True
+    """CHOICE: besides ``duration_options_minutes``, also offer the shortest valid length
+    (2 h of coverage plus the time to come online) and lengths that end exactly when a gap
+    ends, so an offer does not run past the need."""
+    login_buffer_minutes: int = Field(default=10, ge=0)
+    """CHOICE: just-in-time offers start so the physician is online this many minutes before
+    the gap starts (the time to come online is only an estimate)."""
     max_start_options: int = 6
     planning_horizon_minutes: int = 240
     """CHOICE: offers last >= 2h, so offer starts and lengths are planned and valued over a

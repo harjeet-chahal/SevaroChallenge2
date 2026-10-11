@@ -177,7 +177,8 @@ class EventService:
             if table
             else None
         )
-        row_level = {"too_many_invalid_events", "no_valid_events"}
+        # Row-level problems reject that row only; the rest of a judge's file still loads.
+        row_level = {"too_many_invalid_events", "no_valid_events", "row_too_long"}
         structural = [
             i for i in log.issues if i.severity.value == "error" and i.code not in row_level
         ]
@@ -195,7 +196,21 @@ class EventService:
             )
             for r in parsed.rejected
         ]
-        return self._store(accepted, rejected, now_sim, total=parsed.rows_read)
+        rejected += [
+            _Rejected(
+                i.row or 0,
+                None,
+                None,
+                [FieldIssue(field=None, message=i.message)],
+                {},
+                filename,
+                i.row,
+            )
+            for i in log.issues
+            if i.code == "row_too_long"
+        ]
+        total = parsed.rows_read + sum(i.code == "row_too_long" for i in log.issues)
+        return self._store(accepted, rejected, now_sim, total=total, partial=True)
 
     def _store(
         self,
@@ -204,7 +219,11 @@ class EventService:
         now_sim: datetime,
         *,
         total: int,
+        partial: bool = False,
     ) -> EventIngestResult:
+        """Store the accepted events. ``partial`` (CSV append): valid rows are stored and the
+        invalid ones reported; otherwise (JSON) one invalid event stores nothing."""
+        rejected_outcomes: list[EventIngestOutcome] = []
         if rejected:
             for r in rejected:
                 self.repo.add_rejection(
@@ -219,19 +238,21 @@ class EventService:
                     recorded_at=utc_now(),
                 )
             self.session.commit()
-            outcomes = [
+            rejected_outcomes = [
                 EventIngestOutcome(
                     index=r.index, event_id=r.event_id, status="rejected", errors=r.errors
                 )
                 for r in rejected
             ]
-            raise AppError(
-                f"{len(rejected)} of {total} event(s) failed validation; nothing was stored. "
-                "Rejections are recorded in GET /api/events/rejections.",
-                code="event_invalid",
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                details={"outcomes": [o.model_dump(mode="json") for o in outcomes]},
-            )
+            if not partial or not accepted:
+                what = "no row passed validation" if partial else "nothing was stored"
+                raise AppError(
+                    f"{len(rejected)} of {total} event(s) failed validation; {what}. "
+                    "Rejections are recorded in GET /api/events/rejections.",
+                    code="event_invalid",
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    details={"outcomes": [o.model_dump(mode="json") for o in rejected_outcomes]},
+                )
 
         reference = ReferenceRepository(self.session).load()
         physicians = {p.id for p in reference.physicians}
@@ -279,9 +300,9 @@ class EventService:
             received=total,
             accepted=len(accepted) - duplicates,
             duplicates=duplicates,
-            rejected=0,
+            rejected=len(rejected_outcomes),
             simulation_time=now_sim,
-            outcomes=outcomes,
+            outcomes=sorted([*outcomes, *rejected_outcomes], key=lambda o: o.index),
         )
 
     def rejections(self, limit: int, offset: int):

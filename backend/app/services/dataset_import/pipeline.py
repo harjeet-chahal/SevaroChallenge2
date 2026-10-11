@@ -19,7 +19,7 @@ from app.schemas.dataset import DatasetImportReport, DatasetImportStatus, IssueS
 from app.schemas.event import EventSource, NormalizedEvent
 from app.schemas.hospital import Hospital
 from app.schemas.physician import Physician
-from app.schemas.simulation import ReferenceTimeSource
+from app.schemas.simulation import SUPPORTED_RANGE, ReferenceTimeSource, is_supported_time
 from app.services.dataset_import.csv_table import CsvTable, read_csv
 from app.services.dataset_import.datetimes import RosterDatetimeParser
 from app.services.dataset_import.issues import IssueLog
@@ -77,7 +77,12 @@ def _read_manifest(file: DatasetFile, log: IssueLog) -> ManifestInfo:
             raise ValueError("top level must be an object")
         info = ManifestInfo(label=data.get("label"), synthetic=bool(data.get("synthetic", False)))
         if data.get("reference_time"):
-            info.reference_time = to_utc(parse_iso_aware(str(data["reference_time"])))
+            moment = parse_iso_aware(str(data["reference_time"]))
+            if not is_supported_time(moment):
+                raise ValueError(
+                    f"reference_time is outside the supported range ({SUPPORTED_RANGE})"
+                )
+            info.reference_time = to_utc(moment)
         return info
     except NaiveDatetimeError:
         log.add(
@@ -213,6 +218,14 @@ def validate_dataset(
     ctx = ParseContext(mapping=mapping, log=log)
     by_table, manifest_file = _classify(files, mapping, log)
     manifest = _read_manifest(manifest_file, log) if manifest_file else ManifestInfo()
+    if reference_override is not None and not is_supported_time(reference_override):
+        log.add(
+            IssueSeverity.ERROR,
+            "reference_time_invalid",
+            f"reference_time {reference_override.isoformat()} is outside the supported range "
+            f"({SUPPORTED_RANGE})",
+        )
+        reference_override = None
 
     tables: dict[str, list[CsvTable]] = {}
     for table, group in by_table.items():

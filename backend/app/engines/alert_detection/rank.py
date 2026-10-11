@@ -10,13 +10,15 @@ Sort key (lexicographic, most significant first):
                      4 open notes near shift end
                      5 demand spike
                      6 physician signal conflict
-3. urgency           higher first (overrun ratio, imminence, deficit size — per rule)
-4. coverage_risk     hospital with a gap now (2) > projected gap (1) > none (0)
-5. affected          more consults/hospitals touched first
-6. alert_id          stable tie-break
+3. repeat_requests   the hospital called again about this consult: more calls first (brief:
+                     a repeat call is the same patient and "should move up the list")
+4. urgency           higher first (overrun ratio, imminence, deficit size — per rule)
+5. coverage_risk     hospital with a gap now (2) > projected gap (1) > none (0)
+6. affected          more consults/hospitals touched first
+7. alert_id          stable tie-break
 
-Softer workload considerations (urgency, affected) can never lift an alert above a higher
-severity or a more safety-critical category.
+Softer workload considerations (repeat calls, urgency, affected) can never lift an alert
+above a higher severity or a more safety-critical category.
 """
 
 from __future__ import annotations
@@ -43,11 +45,16 @@ def _coverage_risk(ctx: DetectionContext, hospital_id: str | None) -> int:
 def rank_alerts(
     ctx: DetectionContext, drafts: Sequence[AlertDraft], data_version: int
 ) -> AlertList:
+    repeats = {
+        c.consult_id: sum(a.code == "repeat_request" for a in c.anomalies)
+        for c in ctx.state.consultations
+    }
     keyed = []
     for d in drafts:
         rank = AlertRank(
             severity_rank=SEVERITY_RANK[d.severity],
             category_rank=d.category_rank,
+            repeat_requests=repeats.get(d.consult_id or "", 0),
             urgency=round(d.urgency, 6),
             coverage_risk=_coverage_risk(ctx, d.hospital_id),
             affected=d.affected,
@@ -55,6 +62,7 @@ def rank_alerts(
         key = (
             rank.severity_rank,
             rank.category_rank,
+            -rank.repeat_requests,
             -rank.urgency,
             -rank.coverage_risk,
             -rank.affected,
@@ -72,8 +80,13 @@ def rank_alerts(
         reasons = [
             f"{d.severity.value} severity: {d.severity_reason}",
             f"category: {d.category_reason}",
-            f"urgency: {d.urgency_reason}",
         ]
+        if rank.repeat_requests:
+            reasons.append(
+                f"the hospital has called again about this consult ({rank.repeat_requests} "
+                "repeat call(s)); same patient, still waiting since the first request"
+            )
+        reasons.append(f"urgency: {d.urgency_reason}")
         if rank.coverage_risk:
             reasons.append(coverage_text[rank.coverage_risk])
         reasons.append(f"affects {d.affected} open consult(s)/item(s)")

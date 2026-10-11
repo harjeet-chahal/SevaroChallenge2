@@ -3,19 +3,19 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from pydantic import AwareDatetime
 
 from app.api.deps import AppSettings, DbSession
 from app.core.errors import NotFoundError
 from app.schemas.consultation import ConsultationState, ConsultStage
 from app.schemas.physician import PhysicianState
+from app.schemas.simulation import SupportedDatetime
 from app.schemas.state import OperationalState
 from app.services.state import StateService
 
 router = APIRouter(tags=["state"])
 
 AsOf = Annotated[
-    AwareDatetime | None,
+    SupportedDatetime | None,
     Query(
         description=(
             "Reconstruct at this time (ISO-8601 with offset). Defaults to the simulation clock."

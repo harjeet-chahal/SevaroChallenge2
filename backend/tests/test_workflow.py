@@ -191,16 +191,40 @@ def _inject(client, *events):
     assert response.status_code == 201, response.text
 
 
-def test_approval_rechecks_the_offer_against_current_data(wf):
+def test_approval_after_the_planned_start_moves_the_start_to_now(wf):
     created = propose_ok(wf)
-    advance(wf, 5)  # the offer was to start at 22:35Z; it is now 22:40Z
+    (planned,) = created["offer_plan"]
+    assert planned["start_at"] == "2030-09-10T22:35:00Z"
+    advance(wf, 5)  # the lead approves at 22:40Z, after the planned start
+    response = decide(wf, created["id"])
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["offer_plan"]
+    assert item["start_at"] == "2030-09-10T22:40:00Z"
+    assert item["end_at"] == planned["end_at"]  # still ends as planned
+    assert item["duration_minutes"] == planned["duration_minutes"] - 5
+    approved = next(e for e in audit(wf, created["id"]) if e["action"] == "intervention_approved")
+    assert any("has passed" in line for line in approved["details"]["revalidation"])
+    advance(wf, 3)  # sent at 22:43Z: the start moves again, the end does not
+    sent = send(wf, created["id"]).json()
+    (offer,) = sent["offers"]
+    assert offer["start_at"] == "2030-09-10T22:43:00Z" and offer["end_at"] == planned["end_at"]
+    assert "offer_start_moved" in [e["action"] for e in audit(wf, created["id"])]
+
+
+def test_approval_rechecks_the_offer_against_current_data(wf):
+    # 145 min with 20 min to come online: 125 min of coverage. Five minutes later, moved to
+    # start now, it would be worth under 2 h, so the approval is refused.
+    created = propose_ok(wf, physician_ids=[VALE], duration_minutes=145)
+    advance(wf, 6)
     response = decide(wf, created["id"])
 
     assert response.status_code == 409
     error = response.json()["error"]
     assert error["code"] == "revalidation_failed"
-    assert any("has passed" in p for p in error["details"]["problems"])
+    assert any("worth only" in p for p in error["details"]["problems"])
     assert intervention(wf, created["id"])["status"] == "pending_approval"
+    assert intervention(wf, created["id"])["offer_plan"][0]["start_at"] == "2030-09-10T22:35:00Z"
     assert audit(wf, created["id"])[-1]["action"] == "approval_blocked"
     assert wf.get("/api/offers", headers=COORD).json()["total"] == 0
 
@@ -251,7 +275,8 @@ def test_approval_closes_a_request_whose_gap_disappeared(wf):
 def test_three_offers_per_rolling_week_limit(wf):
     for _ in range(3):
         _, offers = offers_sent(wf, physician_ids=[YARA])
-        assert respond(wf, offers[YARA]["id"], YARA, "decline").status_code == 200
+        withdrawn = wf.post(f"/api/offers/{offers[YARA]['id']}/withdraw", headers=COORD, json={})
+        assert withdrawn.status_code == 200, withdrawn.text
 
     response = propose(wf, physician_ids=[YARA])
     assert response.status_code == 422
@@ -263,6 +288,183 @@ def test_three_offers_per_rolling_week_limit(wf):
         if c["physician_id"] == YARA
     )
     assert row["failed_rules"] == ["notification_limits"]
+
+
+def test_offers_from_an_earlier_import_do_not_count_toward_the_weekly_limit(wf):
+    # Three rehearsals on the same database, then the dataset is loaded again for real.
+    for _ in range(3):
+        _, offers = offers_sent(wf, physician_ids=[YARA])
+        withdrawn = wf.post(f"/api/offers/{offers[YARA]['id']}/withdraw", headers=COORD, json={})
+        assert withdrawn.status_code == 200, withdrawn.text
+    assert propose(wf, physician_ids=[YARA]).status_code == 422  # limit reached in this import
+
+    load(wf)
+    row = next(
+        c
+        for c in wf.get("/api/optimization/split-shifts").json()["candidates"]
+        if c["physician_id"] == YARA
+    )
+    assert "notification_limits" not in row["failed_rules"]
+    _, offers = offers_sent(wf, physician_ids=[YARA])  # propose, approve and send all succeed
+    assert offers[YARA]["status"] == "sent"
+
+
+def test_once_a_gap_is_filled_other_requests_for_it_are_closed_and_never_sent(wf):
+    a = propose_ok(wf, physician_ids=[VALE])
+    b = propose_ok(wf, physician_ids=[YARA], hospital_ids=[RIDGE], alert_id=None)
+    assert decide(wf, a["id"]).status_code == 200
+    assert decide(wf, b["id"]).status_code == 200
+    sent = send(wf, a["id"]).json()
+    assert respond(wf, sent["offers"][0]["id"], VALE).json()["outcome"] == "accepted"
+
+    closed = intervention(wf, b["id"])
+    assert closed["status"] == "no_longer_required"
+    assert "secured through" in closed["status_reason"]
+    assert send(wf, b["id"]).status_code == 409
+    assert wf.get("/api/offers/mine", headers=doctor(YARA)).json() == []
+    # A new request for the same, now covered, gap is refused before anyone is asked.
+    again = propose(wf, physician_ids=[YARA], hospital_ids=[RIDGE], alert_id=None)
+    assert again.status_code == 422
+    assert "already secured" in " ".join(again.json()["error"]["details"]["blocking_reasons"])
+
+
+def test_a_redundant_acceptance_closes_the_request(wf):
+    created, offers = offers_sent(wf, physician_ids=[VALE])
+    # A judge CSV puts another physician on shift at Ridge: the gap closes on its own.
+    csv = (
+        "event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,"
+        "description\n"
+        "JUDGE-W1,2030-09-10T17:36:00-05:00,2030-09-10T17:36:05-05:00,,shift_started,SRG-P7,,"
+        "Shift started\n"
+    )
+    appended = wf.post("/api/events/csv", files={"file": ("judge.csv", io.BytesIO(csv.encode()))})
+    assert appended.status_code == 201, appended.text
+    advance(wf, 2)
+
+    assert respond(wf, offers[VALE]["id"], VALE).json()["outcome"] == "redundant"
+    record = intervention(wf, created["id"])
+    assert record["status"] == "no_longer_required" and record["is_terminal"]
+
+
+def test_an_acceptance_for_a_later_gap_binds_even_while_an_earlier_shift_is_ending(wf):
+    _, offers = offers_sent(wf, physician_ids=[VALE])
+    assert respond(wf, offers[VALE]["id"], VALE).json()["outcome"] == "accepted"
+    advance(wf, 20)  # Vale online; his shift ends at 02:35Z
+    advance(wf, 155)  # 01:30Z: Ridge is short again from 02:35Z
+    _, later = offers_sent(wf, physician_ids=[YARA], hospital_ids=[RIDGE], alert_id=None)
+
+    reply = respond(wf, later[YARA]["id"], YARA).json()
+    assert reply["outcome"] == "accepted"  # not "redundant" because of Vale's ending shift
+
+
+def test_what_if_preview_applies_the_offer_log_and_declines(wf):
+    def what_if(pid: str) -> dict:
+        body = {"action": {"kind": "split_shift", "physician_id": pid, "duration_minutes": 240}}
+        response = wf.post("/api/optimization/simulate", json=body)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    assert what_if(VALE)["allowed"] is True
+    _, offers = offers_sent(wf, physician_ids=[VALE])
+    open_offer = what_if(VALE)
+    assert open_offer["allowed"] is False
+    assert [v["code"] for v in open_offer["violations"]] == ["notification_limits"]
+
+    assert respond(wf, offers[VALE]["id"], VALE, "decline").status_code == 200
+    declined = what_if(VALE)
+    assert declined["allowed"] is False
+    assert "not_declined" in [v["code"] for v in declined["violations"]]
+
+
+def test_staff_free_text_never_reaches_the_physician_phone(wf):
+    note = "SRG-C220 stroke patient Jane Doe transferred"
+    created, offers = offers_sent(wf, physician_ids=[VALE, YARA])
+    withdrawn = wf.post(
+        f"/api/offers/{offers[YARA]['id']}/withdraw", headers=COORD, json={"reason": note}
+    )
+    assert withdrawn.status_code == 200
+    assert respond(wf, offers[VALE]["id"], VALE).json()["outcome"] == "accepted"
+    cancelled = wf.post(
+        f"/api/interventions/{created['id']}/cancel", headers=LEAD, json={"reason": note}
+    )
+    assert cancelled.status_code == 200
+
+    for pid in (VALE, YARA):
+        phone = json.dumps(wf.get("/api/offers/mine", headers=doctor(pid)).json())
+        assert "Jane Doe" not in phone and "SRG-C220" not in phone
+    late = respond(wf, offers[YARA]["id"], YARA)
+    assert "Jane Doe" not in late.text
+    # Staff still see what was written, in the audit trail.
+    assert any(note in e["summary"] for e in audit(wf, created["id"]))
+
+
+def test_one_big_clock_jump_activates_and_completes_a_shift_at_their_own_times(wf):
+    created, offers = offers_sent(wf, physician_ids=[VALE])
+    assert respond(wf, offers[VALE]["id"], VALE).status_code == 200
+    advance(wf, 300)  # past the expected online time (22:55Z) and the end (02:35Z)
+
+    record = intervention(wf, created["id"])
+    assert record["status"] == "completed"
+    impact = wf.get(f"/api/interventions/{created['id']}/impact", headers=COORD).json()
+    assert impact["at_activation"]["total_before"] > impact["at_activation"]["total_after"]
+    activated = next(e for e in audit(wf, created["id"]) if e["action"] == "physician_activated")
+    assert activated["occurred_at"] == "2030-09-10T22:55:00Z"
+    assert "17:55" in activated["details"]["seed_reason"]  # go-live time, not the jump's end
+
+
+def test_an_offer_cannot_be_answered_before_it_was_sent(wf):
+    advance(wf, 5)
+    _, offers = offers_sent(wf, physician_ids=[VALE])
+    reset = wf.post("/api/simulation/reset")
+    assert reset.status_code == 200, reset.text
+
+    early = respond(wf, offers[VALE]["id"], VALE)
+    assert early.status_code == 409
+    assert early.json()["error"]["code"] == "offer_not_sent_yet"
+    # Still open: no second offer may be sent to Vale meanwhile.
+    row = next(
+        c
+        for c in wf.get("/api/optimization/split-shifts").json()["candidates"]
+        if c["physician_id"] == VALE
+    )
+    assert "notification_limits" in row["failed_rules"]
+
+
+def test_withdrawing_an_accepted_offer_cancels_that_shift(wf):
+    created, offers = offers_sent(wf, physician_ids=[VALE])
+    assert respond(wf, offers[VALE]["id"], VALE).status_code == 200
+    withdrawn = wf.post(f"/api/offers/{offers[VALE]['id']}/withdraw", headers=COORD, json={})
+    assert withdrawn.status_code == 200, withdrawn.text
+
+    assert withdrawn.json()["status"] == "cancelled"
+    assert intervention(wf, created["id"])["status"] == "cancelled"  # its only shift
+    assert physician(wf, VALE)["temporary_shift"] is None
+    assert "split_shift_cancelled" in [e["action"] for e in audit(wf, created["id"])]
+
+
+def test_an_escalation_must_name_a_known_hospital_or_consult(wf):
+    for body in ({"hospital_id": "NOPE"}, {"consult_id": "NOPE-C1"}):
+        response = propose(wf, type="escalation", alert_id=None, **body)
+        assert response.status_code == 422, response.text
+        assert "Unknown" in " ".join(response.json()["error"]["details"]["blocking_reasons"])
+
+
+def test_a_declined_physician_is_not_asked_again_for_the_same_gap(wf):
+    _, offers = offers_sent(wf, physician_ids=[YARA])
+    assert respond(wf, offers[YARA]["id"], YARA, "decline").status_code == 200
+
+    response = propose(wf, physician_ids=[YARA])
+    assert response.status_code == 422
+    reasons = " ".join(response.json()["error"]["details"]["blocking_reasons"])
+    assert "declined an offer for Ridge Sample Clinic" in reasons
+    row = next(
+        c
+        for c in wf.get("/api/optimization/split-shifts").json()["candidates"]
+        if c["physician_id"] == YARA
+    )
+    assert row["failed_rules"] == ["not_declined"]
+    # Someone who has not said no can still be asked for the same gap.
+    assert propose(wf, physician_ids=[VALE]).status_code == 201
 
 
 def test_rolling_week_counts_offers_sent_in_the_last_168_hours(wf, settings):
@@ -664,6 +866,26 @@ def test_every_transition_is_audited_with_simulation_times(wf):
     assert physician(wf, VALE)["on_shift"] is False
 
 
+def test_a_worked_split_shift_counts_for_rest_and_weekly_hours(wf):
+    _, offers = offers_sent(wf, physician_ids=[VALE])
+    assert respond(wf, offers[VALE]["id"], VALE).status_code == 200
+    advance(wf, 20)  # online at 17:55 CDT
+    advance(wf, 241)  # 02:36Z: the split shift ended at 02:35Z
+
+    row = next(
+        c
+        for c in wf.get("/api/optimization/split-shifts").json()["candidates"]
+        if c["physician_id"] == VALE
+    )
+    checks = {c["code"]: c for c in row["checks"]}
+    assert row["failed_rules"] == ["rest_10h"]  # 1 minute of rest, not 26 h
+    assert "Sep 10 21:35 CDT" in checks["rest_10h"]["value"]
+    hours = float(checks["weekly_hours"]["value"].split(" h")[0])
+    assert hours > 24  # the roster's 24 h plus the hours just worked
+    refused = propose(wf, physician_ids=[VALE], hospital_ids=[RIDGE], alert_id=None)
+    assert refused.status_code == 422
+
+
 # 20. Judge CSV events append without erasing interventions --------------------------------------
 
 
@@ -752,7 +974,10 @@ def test_backend_restart_preserves_workflow_state(wf, make_client):
 def test_full_reimport_closes_open_workflow_and_keeps_history(wf):
     accepted, offers = offers_sent(wf)
     respond(wf, offers[VALE]["id"], VALE)
-    pending = propose_ok(wf, physician_ids=[YARA], alert_id=None, hospital_ids=[RIDGE])
+    # (A second split shift for Ridge would now be refused: Vale's acceptance covers it.)
+    pending = propose_ok(
+        wf, type="escalation", alert_id="STAGE_TRIAGED_UNASSIGNED:consult:SRG-C220"
+    )
 
     load(wf)  # replace the dataset
 

@@ -10,7 +10,10 @@ layered on afterwards and is time-aware: at ``as_of`` an entry is
   from the expected online time (uncertain, clearly labelled);
 - **active** once activated: on shift until the offer ends, counted as confirmed
   coverage and routable, but only inside the approved routing scope, with the seeded
-  routing count from split-shift trap protection.
+  routing count from split-shift trap protection;
+- **worked** once it has ended (completed, or cancelled after activation): the physician
+  is back off shift, but the shift counts as their last shift for the 10 h rest rule and
+  its hours count toward the rolling 7-day limit, exactly like a scheduled shift.
 
 Import ``apply_workflow_overlay(state, reference, entries)`` from here.
 """
@@ -19,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.engines.replay import summarize
 from app.engines.timeline import fmt_local
@@ -60,6 +63,21 @@ def phase_at(entry: OverlayEntry, as_of: datetime) -> str | None:
     return "preparing"
 
 
+def worked_shifts(
+    entries: Sequence[OverlayEntry], as_of: datetime
+) -> dict[str, list[tuple[datetime, datetime]]]:
+    """physician_id -> [(online, ended)] for split shifts fully worked by ``as_of``
+    (completed, or cancelled after activation)."""
+    worked: dict[str, list[tuple[datetime, datetime]]] = {}
+    for e in entries:
+        if e.activated_at is None or e.activated_at > as_of:
+            continue
+        end = min(e.ended_at or e.end_at, e.end_at)
+        if e.activated_at < end <= as_of:
+            worked.setdefault(e.physician_id, []).append((e.activated_at, end))
+    return worked
+
+
 def apply_workflow_overlay(
     state: OperationalState, reference: ReferenceData, entries: Sequence[OverlayEntry]
 ) -> tuple[OperationalState, ReferenceData]:
@@ -69,7 +87,8 @@ def apply_workflow_overlay(
         phase = phase_at(e, as_of)
         if phase is not None:
             in_effect[e.physician_id] = (e, phase)
-    if not in_effect:
+    worked = worked_shifts(entries, as_of)
+    if not in_effect and not worked:
         return state, reference
 
     physicians = []
@@ -125,20 +144,36 @@ def apply_workflow_overlay(
     profiles = []
     for prof in reference.physicians:
         hit = in_effect.get(prof.id)
-        if hit is None:
+        done = worked.get(prof.id, [])
+        if hit is None and not done:
             profiles.append(prof)
             continue
-        e, phase = hit
         schedule = prof.schedule
         hours = schedule.hours_worked_trailing_7d
-        nxt = schedule.next_shift_starts_at
-        sched_update: dict = {
+        sched_update: dict = {}
+        if done:
+            # A split shift already worked is a real shift: it resets the 10 h rest clock and
+            # its hours stay in the rolling 7-day total for 7 days.
+            last = max(end for _, end in done)
+            previous = schedule.last_shift_ended_at
+            sched_update["last_shift_ended_at"] = (
+                last if previous is None or last > previous else previous
+            )
+            recent = sum(
+                (end - start).total_seconds() / 3600
+                for start, end in done
+                if end > as_of - timedelta(days=7)
+            )
+            hours = None if hours is None else hours + recent
+        if hit is not None:
+            e, phase = hit
             # The committed split shift counts toward the 60 h rolling limit ...
-            "hours_worked_trailing_7d": None if hours is None else hours + e.minutes / 60,
-        }
-        if phase == "preparing":
-            # ... and blocks overlapping offers like a scheduled shift would.
-            sched_update["next_shift_starts_at"] = min(nxt, e.start_at) if nxt else e.start_at
+            hours = None if hours is None else hours + e.minutes / 60
+            if phase == "preparing":
+                # ... and blocks overlapping offers like a scheduled shift would.
+                nxt = schedule.next_shift_starts_at
+                sched_update["next_shift_starts_at"] = min(nxt, e.start_at) if nxt else e.start_at
+        sched_update["hours_worked_trailing_7d"] = hours
         profiles.append(
             prof.model_copy(update={"schedule": schedule.model_copy(update=sched_update)})
         )

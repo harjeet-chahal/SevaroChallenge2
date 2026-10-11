@@ -101,6 +101,12 @@ def render_plan(
                 )
         else:
             explanation.append(f"{p.name} is the only eligible physician.")
+        if edge.overflow:
+            explanation.append(
+                f"{c.hospital_name or c.hospital_id} is outside {p.name}'s split-shift "
+                f"hospitals ({', '.join(p.scope)}). Allowed as a last resort: the consult is "
+                "past a time limit and no one else can take it."
+            )
         if c.kind == "reassign":
             current = problem.physicians.get(c.current_physician_id or "")
             explanation.append(
@@ -288,6 +294,13 @@ def policy_used(problem: DispatchProblem) -> DispatchPolicyUsed:
             "consistent with the Phase 3 alert ranking (severity first, then stroke).",
             f"Synchronous capacity {r.sync_capacity} new consult per physician per round; "
             "asynchronous open consults add workload cost only.",
+            "Split-shift scope: a physician on a split shift takes consults only at the gap "
+            "hospitals, except a consult at another credentialed hospital that already has a "
+            f"{cfg.trap.overflow_min_severity} alert or worse; that option costs more than any "
+            "regular one, so it is used only when no one else can take the consult."
+            if cfg.trap.overflow_outside_scope
+            else "Split-shift scope: a physician on a split shift takes consults only at the "
+            "gap hospitals.",
             "Edge-cost weights are bounded integers (see weights).",
         ],
         weights=cfg.weights.model_dump(),

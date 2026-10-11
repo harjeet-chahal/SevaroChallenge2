@@ -73,5 +73,8 @@ class ConsultationState(ApiModel):
     assignment_history: list[AssignmentChange] = Field(default_factory=list)
     routing_failures: int = Field(default=0, ge=0)
     last_routing_failure_at: AwareDatetime | None = None
+    routing_started_at: AwareDatetime | None = None
+    """First routing activity (a ring or a failed routing attempt): a consult can be routed
+    without a recorded triage event, and is then waiting for a doctor from this time."""
     evidence_event_ids: list[EntityId] = Field(default_factory=list)
     anomalies: list[StateAnomaly] = Field(default_factory=list)

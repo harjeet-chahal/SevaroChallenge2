@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from datetime import datetime
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AfterValidator, AwareDatetime, Field, model_validator
 
 from app.schemas.common import ApiModel
+
+MIN_SUPPORTED_YEAR = 1900
+MAX_SUPPORTED_YEAR = 2200
+SUPPORTED_RANGE = f"years {MIN_SUPPORTED_YEAR}-{MAX_SUPPORTED_YEAR}"
+"""Timestamps the engine accepts (events, roster times, the clock, ``as_of``). Far enough
+from datetime's limits (years 1-9999) that UTC conversion and the replay's date
+arithmetic can never overflow."""
+
+
+def is_supported_time(value: datetime) -> bool:
+    """Checked on the value as given (before UTC conversion, which can itself overflow)."""
+    return MIN_SUPPORTED_YEAR <= value.year <= MAX_SUPPORTED_YEAR
+
+
+def _check_supported_time(value: datetime) -> datetime:
+    if not is_supported_time(value):
+        raise ValueError(f"{value.isoformat()} is outside the supported range ({SUPPORTED_RANGE})")
+    return value
+
+
+SupportedDatetime = Annotated[AwareDatetime, AfterValidator(_check_supported_time)]
+"""An aware datetime within ``SUPPORTED_RANGE``; anything else is a 422 validation error."""
 
 ReferenceTimeSource = Literal[
     "import_option",
@@ -35,8 +58,8 @@ class SimulationClock(ApiModel):
 
 
 class SetSimulationTimeRequest(ApiModel):
-    time: AwareDatetime
-    """ISO-8601 with a UTC offset."""
+    time: SupportedDatetime
+    """ISO-8601 with a UTC offset. The service also keeps it near the loaded dataset."""
 
 
 class AdvanceSimulationRequest(ApiModel):

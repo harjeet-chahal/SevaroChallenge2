@@ -31,6 +31,7 @@ export const RULE_SHORT: Record<string, string> = {
   no_overlap: "No overlap",
   min_length: "≥ 2 h",
   notification_limits: "Offer limits",
+  not_declined: "Not declined",
 };
 
 /** Hospital id -> time zone, from the coverage report (display only). */

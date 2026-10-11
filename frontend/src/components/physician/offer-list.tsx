@@ -83,18 +83,27 @@ export function OfferList() {
   const people = recipients.data ?? [];
   const fallback =
     people.find((p) => p.open_offers > 0)?.physician_id ?? people[0]?.physician_id ?? null;
+  const known = people.find((p) => p.physician_id === picked)?.physician_id ?? null;
   // The first default sticks: answering an offer must not silently switch the simulated user.
-  if (picked === null && fallback !== null) setPicked(fallback);
-  const physicianId = people.find((p) => p.physician_id === picked)?.physician_id ?? fallback;
+  // A remembered id that is not in this list (e.g. picked under another dataset) is replaced
+  // the same way, once, and the replacement is remembered.
+  if (known === null && fallback !== null) {
+    if (picked !== null) store(fallback);
+    setPicked(fallback);
+  }
+  const physicianId = known ?? fallback;
   const offers = useKeyedResource(physicianId ? `${physicianId}|${versions}` : null, (signal) =>
-    offersApi.mine(physicianId!, signal),
+    offersApi.mine(physicianId!, signal).then((items) => ({ physicianId: physicianId!, items })),
   );
+  // The previous doctor's offers stay in the resource while the new doctor's load; never
+  // show them (with live Accept/Decline) under another name.
+  const mine = offers.data?.physicianId === physicianId ? offers.data.items : null;
 
   if (availability === "checking" || availability === "offline" || availability === "degraded" || !loaded) {
     return <DataEmptyState feature="offers" whenNoDataset="No dataset is loaded, so there are no offers." />;
   }
 
-  const all = offers.data ?? [];
+  const all = mine ?? [];
   const open = all.filter((o) => o.status === "sent");
   const committed = all.filter((o) => o.status === "accepted" || o.status === "active");
   const past = all.filter((o) => !open.includes(o) && !committed.includes(o));
@@ -128,10 +137,17 @@ export function OfferList() {
         </p>
       </div>
 
-      {offers.error ? <p className="text-sm text-critical">{offers.error}</p> : null}
-      {!offers.data && !offers.error ? (
+      {recipients.error ? (
+        <p className="text-sm text-critical">{recipients.error}</p>
+      ) : !recipients.data ? (
         <p className="text-sm text-muted-foreground">Loading offers…</p>
-      ) : physicianId ? (
+      ) : !physicianId ? (
+        <EmptyState compact icon={Inbox} title="No off-shift physicians in this dataset" />
+      ) : offers.error ? (
+        <p className="text-sm text-critical">{offers.error}</p>
+      ) : !mine ? (
+        <p className="text-sm text-muted-foreground">Loading offers…</p>
+      ) : (
         <>
           <Section
             title="Needs your reply"
@@ -153,8 +169,6 @@ export function OfferList() {
             simulationTime={config?.simulation_time ?? null}
           />
         </>
-      ) : (
-        <EmptyState compact icon={Inbox} title="No off-shift physicians in this dataset" />
       )}
     </div>
   );

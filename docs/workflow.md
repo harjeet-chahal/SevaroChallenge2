@@ -97,9 +97,10 @@ Proposal, approval and sending each re-derive everything from the current data. 
 | Rule | Implementation |
 | --- | --- |
 | One open offer per physician | `sent` offers count as open. An accepted, unfinished split shift also blocks new offers to that physician. Checked at proposal, approval and send, and enforced by a partial unique index |
-| ≤ 3 offers per week | **Rolling 7 × 24 h** window ending at the simulation time, counting every offer sent (any outcome). Rolling is stricter than a calendar week and needs no week-start convention |
+| ≤ 3 offers per week | **Rolling 7 × 24 h** window ending at the simulation time, counting every offer sent (any outcome) under the active dataset import. Rolling is stricter than a calendar week and needs no week-start convention; offers from before a re-import (e.g. rehearsals) don't count |
 | Expires after 10 min | `expires_at = sent_at + 10 min` (simulation clock). Expiry is applied before any reply, so an expired offer can never be accepted |
 | Declined / cancelled / withdrawn cannot be accepted | 409 `offer_declined` / `offer_cancelled` / `offer_withdrawn`. The attempt is still recorded |
+| A "no" is not asked again | After a decline the physician fails `not_declined` for that hospital until the declined offer would have ended. If nobody else qualifies, the next proposal is refused with "escalate instead of bending a rule" |
 | Duplicate replies | Repeating the same answer returns 200 with `idempotent_replay: true` and changes nothing |
 | Everything logged | Every attempt goes to `wf_offer_responses` and `wf_audit_log` |
 
@@ -122,6 +123,8 @@ Policy (CHOICE, documented in `engines/interventions/policy.py`):
    - the forecast still shows a deficit at the offer's hospitals during the time it would cover.
 3. Otherwise the acceptance is recorded as **`redundant`**. The physician is released and told so, nothing is activated, and `conflict_detected` and `conflict_resolved` are audited. Valid acceptances are never dropped.
 4. As soon as a need is met, every other `sent` offer for it is **withdrawn** with the reason shown on the physician's phone. A later acceptance of a withdrawn offer is still recorded (`redundant_acceptance_recorded`) and returns 409 `offer_withdrawn`.
+5. **Stop asking before sending, too.** Requests for the same hospitals that are still pending approval or approved (no offer sent) are closed as `no_longer_required` once none of their planned shifts would cover a remaining deficit. Propose, approve and send each re-check that the planned shift still covers some deficit, counting accepted and active shifts; if not, the proposal is refused, the approval closes the request, and send skips that offer (closing the request if none is left).
+6. A binding acceptance only counts against another shift whose time overlaps it: a shift that is about to end does not make an acceptance for a later gap redundant. A redundant acceptance closes its request (`no_longer_required`) when no other offer is open.
 
 Tested sequentially (primary plus backup) and concurrently (two threads accepting at once for the same gap). Exactly one binds.
 
@@ -131,7 +134,7 @@ Tested sequentially (primary plus backup) and concurrently (two threads acceptin
 | --- | --- | --- | --- |
 | Accepted (preparing) | still off shift | `pending_activation` window from the expected online time. Uncertain, never at "now", never confirmed | not routable |
 | Active | on shift until the offer ends | confirmed contributor at the approved scope hospitals only | routable inside the approved scope, with seeded count = seed + consults taken |
-| Completed / cancelled | back off shift | removed | removed |
+| Completed / cancelled | back off shift; a shift that was worked counts for the 10 h rest and 7-day hours rules | removed | removed |
 
 - **Expected online time** is max(offer start, acceptance time) + the roster's minutes to come online.
 - **Activation (deterministic simulation):** the physician may press "I'm online" from the phone once the shift has started, or the coordinator may simulate it. Otherwise, when the clock reaches the expected online time, the system activates the physician at exactly that simulated time.
@@ -148,14 +151,17 @@ Tested sequentially (primary plus backup) and concurrently (two threads acceptin
   - open interventions become `no_longer_required` (or `cancelled` where the state machine requires it).
 
   History stays visible with `GET /api/interventions?scope=all`. An event-CSV append (`POST /api/events/csv`, the judging file) is not a replacement and leaves all workflow state intact.
-- Moving the clock **backwards** does not undo decisions. Derived staffing applies a workflow fact only from its simulated timestamp onwards.
+- Moving the clock **backwards** does not undo decisions. Derived staffing applies a workflow fact only from its simulated timestamp onwards. An offer cannot be answered while the clock is before its send time (409 `offer_not_sent_yet`), and it still counts as open for the one-open-offer rule.
+- One clock move can make several steps due (e.g. activation, then the shift's end): the sweep applies them pass by pass, each at its own simulated time. Activation impact and the go-live seed are computed at the activation time itself.
+- Withdrawing an accepted or active offer cancels that physician's shift only; the request follows from its offers (cancelled if it was the only one).
+- Escalations of a projected coverage gap stay valid when it becomes a current gap (`COVERAGE_GAP_PROJECTED` → `COVERAGE_GAP_NOW` for the same hospital is the same problem), for approval, the duplicate guard and the alert's linked interventions.
 
 ## 8. Split-shift trap protection (live)
 
 On activation, the Phase 4 protection policy is applied to real routing:
 
-- the routing scope is the credentialed gap hospitals (`routing_scope_hospital_ids`);
-- the routing count is seeded (median of on-shift peers covering those hospitals) plus the consults actually taken.
+- the routing scope is the credentialed gap hospitals (`routing_scope_hospital_ids`). A consult at another credentialed hospital that is already past a time limit can still reach the physician, but only as a last resort (see [optimization.md §3](optimization.md#3-split-shift-trap));
+- the routing count is seeded plus the consults actually taken. The seed is recalculated at go-live from the physicians working at the scope hospitals then (the proposal's figure is an estimate: the peers covering a hospital at proposal time have often left by the time the gap starts). `physician_activated` records both values.
 
 `GET /api/interventions/{id}/impact` reports:
 
@@ -180,7 +186,7 @@ The physician payload (`PhysicianOfferView`) has a fixed set of fields:
 - send, expiry and response times;
 - status, flags and a message.
 
-The reason is generated from hospital names, the shortfall time and whether demand is surging. Consult IDs, consult types, patient details and the coordinator's note are never included. A defensive check runs on every offer reason, and a test scans the payloads.
+The reason is generated from hospital names, the shortfall time and whether demand is surging. Consult IDs, consult types, patient details and the coordinator's note are never included. A defensive check runs on every offer reason, and a test scans the payloads. A free-text reason given when cancelling or withdrawing goes to the audit log and the request only; the phone shows generated wording ("withdrawn by the coordinator").
 
 ## 10. Live updates
 
@@ -236,7 +242,7 @@ To run the demo against an isolated database, use the `backend-demo` (:8001, `ba
 - Roles are simulated headers, not authentication. There are no real messages (no SMS or push); delivery is recorded only.
 - One backend process is assumed for the in-process lock. SQLite `BEGIN IMMEDIATE` still serializes across processes, but caches are per process.
 - `required_physicians` is the peak deficit at the need hospitals in the 240-minute planning window. Partial coverage by a later acceptance is treated as redundant once the quota is met.
-- An offer's start is fixed at proposal. If the clock passes it before approval, the approval is refused as stale and must be re-proposed.
+- If the clock passes an offer's planned start before approval or sending, the start moves to the current time and the end stays as planned; every rule is re-checked on the moved offer (e.g. it must still be worth ≥ 2 h after the time to come online), and the move is recorded (`offer_start_moved`, approval revalidation lines).
 - Activation timing is a deterministic simulation (the roster estimate), not a measured login. No-shows are not modeled beyond "never activated before the shift ended" when auto-activation is disabled.
 - Reassignment writes a simulated Synapse event. A later real assignment event in the data supersedes it by event time.
 - Coverage still counts busy physicians as available (Phase 3 default). See §14.

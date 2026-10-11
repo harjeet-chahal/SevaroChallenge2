@@ -158,22 +158,43 @@ export function IngestResultView({
     );
   }
   if (!result) return null;
+  const skipped = result.outcomes.filter((o) => o.status === "rejected");
+  const stored = result.outcomes.filter((o) => o.status !== "rejected");
   return (
-    <div className="rounded-lg border border-success-border bg-success-soft/40 p-3 text-sm">
-      <p className="font-semibold text-success">
-        {result.accepted} event(s) accepted, {result.duplicates} duplicate(s)
-      </p>
-      <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-        {result.outcomes.map((o) => (
-          <li key={o.index}>
-            {o.event_id}: {o.status}
-            {o.visible_now === false
-              ? " (not visible until the clock reaches its ingested_at)"
-              : ""}
-            {o.warnings.length ? ` — ${o.warnings.join("; ")}` : ""}
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-2">
+      <div className="rounded-lg border border-success-border bg-success-soft/40 p-3 text-sm">
+        <p className="font-semibold text-success">
+          {result.accepted} event(s) accepted, {result.duplicates} duplicate(s)
+        </p>
+        <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+          {stored.map((o) => (
+            <li key={`${o.index}-${o.event_id}`}>
+              {o.event_id}: {o.status}
+              {o.visible_now === false
+                ? " (not visible until the clock reaches its ingested_at)"
+                : ""}
+              {o.warnings.length ? ` — ${o.warnings.join("; ")}` : ""}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {skipped.length ? (
+        <div className="rounded-lg border border-critical-border bg-critical-soft/40 p-3 text-sm">
+          <p className="font-semibold text-critical">
+            {skipped.length} row(s) rejected and not stored; the other rows were loaded.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {skipped.map((r) => (
+              <li key={`${r.index}-${r.event_id}`}>
+                <span className="font-medium">
+                  Row {r.index} {r.event_id ?? "(no id)"}
+                </span>
+                <FieldErrors errors={r.errors} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

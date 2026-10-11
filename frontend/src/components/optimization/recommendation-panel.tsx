@@ -51,7 +51,7 @@ export function RecommendationPanel({ className }: { className?: string }) {
       className={className}
       title="Recommendations"
       icon={Sparkles}
-      description="Optimizer proposals for routing and split-shift staffing, with the reasoning behind each. Acting on one opens a validated proposal; nothing is executed from this panel."
+      info="Optimizer proposals for routing and split-shift staffing, with the reasoning behind each. Acting on one opens a validated proposal; nothing is executed from this panel."
       action={<TagBadge tone="info">Proposals only</TagBadge>}
     >
       <Tabs value={tab} onValueChange={(v) => setTab(v as RecommendationTab)}>

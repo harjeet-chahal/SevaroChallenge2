@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
-from pydantic import AwareDatetime
+from fastapi import APIRouter, Query, status
 
 from app.api.deps import AppSettings, Cache, DbSession, OptCache
+from app.core.errors import AppError
 from app.schemas.dispatch import DispatchResult
+from app.schemas.simulation import SUPPORTED_RANGE, SupportedDatetime, is_supported_time
 from app.schemas.staffing import StaffingResult
 from app.schemas.whatif import OptimizationComparison, SimulateRequest, WhatIfResult
 from app.services.optimization import OptimizationService
@@ -20,13 +21,26 @@ from app.services.optimization import OptimizationService
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 
 AsOf = Annotated[
-    AwareDatetime | None,
+    SupportedDatetime | None,
     Query(description="Optimize at this time (ISO-8601 with offset). Defaults to the clock."),
 ]
 
 
 def _service(db, settings, cache, opt_cache) -> OptimizationService:
     return OptimizationService(db, settings, cache, opt_cache)
+
+
+def _check_body_times(body: SimulateRequest) -> None:
+    """Same window as the ``as_of`` query parameter; the body schema can't carry it."""
+    start = getattr(body.action, "start", None)
+    for field, value in (("as_of", body.as_of), ("action.start", start)):
+        if value is not None and not is_supported_time(value):
+            raise AppError(
+                f"{field} {value.isoformat()} is outside the supported range ({SUPPORTED_RANGE})",
+                code="validation_error",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                details={"field": field},
+            )
 
 
 @router.get(
@@ -74,4 +88,5 @@ def simulate(
     cache: Cache,
     opt_cache: OptCache,
 ) -> WhatIfResult:
+    _check_body_times(body)
     return _service(db, settings, cache, opt_cache).simulate(body)

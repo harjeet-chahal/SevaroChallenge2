@@ -7,8 +7,9 @@ import random
 
 from opt_helpers import NOW, OptScenario, config, dispatch, m, pairs
 
-from app.engines.optimization import OptimizationConfig, build_dispatch_problem
+from app.engines.optimization import OptimizationConfig, build_dispatch_problem, run_dispatch
 from app.engines.optimization.routing import penalties, solve_baseline, solve_min_cost_flow
+from app.engines.optimization.routing.problem import max_edge_cost
 from app.engines.optimization.routing.solve import objective
 
 
@@ -289,3 +290,126 @@ def test_baseline_uses_the_same_problem_and_hard_constraints():
     } == {c.consult_id for c in problem.consults}
     assert all((c, p) in problem.edges for c, p in base_pairs.items())
     assert result.plan.objective_cost <= baseline.objective_cost
+
+
+# Split-shift scope: a last resort for overdue consults, never a wall --------------------
+
+
+def scoped_joiner() -> OptScenario:
+    """J joined on a split shift for H1 only, but is also credentialed at H2. C-OLD (stroke,
+    triaged 11 min ago: critical) and C-NEW (triaged 1 min ago: no alert) wait at H2."""
+    s = two_hospitals().doctor("J", ["H1", "H2"])
+    s.consult("C-OLD", "H2", received=-12, triaged=-11)
+    return s.consult("C-NEW", "H2", "General Neuro", received=-2, triaged=-1)
+
+
+def scoped(s: OptScenario, cfg: OptimizationConfig | None = None):
+    return run_dispatch(
+        s.analyze(NOW), cfg or OptimizationConfig(), scopes={"J": frozenset({"H1"})}
+    )
+
+
+def test_an_overdue_consult_outside_the_scope_goes_to_the_joiner_if_nobody_else_can_take_it():
+    result, baseline, problem = scoped(scoped_joiner())
+
+    assert pairs(result) == {"C-OLD": "J"}
+    assert {r.consult_id: r.physician_id for r in baseline.recommendations} == {"C-OLD": "J"}
+    (rec,) = result.plan.recommendations
+    assert "split_shift_overflow" in {c.name for c in rec.cost_breakdown}
+    assert any("last resort" in line for line in rec.explanation)
+    # An overflow edge costs more than any regular edge could.
+    assert problem.edges[("C-OLD", "J")].overflow
+    assert problem.edges[("C-OLD", "J")].cost > max_edge_cost(OptimizationConfig())
+    assert problem.max_edge_cost >= problem.edges[("C-OLD", "J")].cost
+    # A consult that is not overdue stays outside the scope.
+    assert ("C-NEW", "J") not in problem.edges
+    (u,) = result.plan.unassigned
+    assert u.consult_id == "C-NEW"
+    assert u.excluded[0].reasons == ["outside routing scope (split-shift protection)"]
+
+
+def test_the_joiner_is_only_the_last_resort_when_someone_else_can_take_the_consult():
+    s = two_hospitals().doctor("J", ["H1", "H2"]).doctor("K", ["H2"]).history("K", "H2", 9)
+    s.consult("C-OLD", "H2", received=-12, triaged=-11)
+    result, baseline, _ = scoped(s)
+
+    # K is busier (9 consults, not low volume) but in scope: K takes the overdue consult.
+    assert pairs(result) == {"C-OLD": "K"}
+    assert {r.consult_id: r.physician_id for r in baseline.recommendations} == {"C-OLD": "K"}
+
+    # With a second consult waiting at H2, K alone would leave one unassigned: J takes the
+    # overdue one (the only one allowed outside the scope) so both are placed.
+    both, baseline, _ = scoped(scoped_joiner().doctor("K", ["H2"]).history("K", "H2", 9))
+    assert pairs(both) == {"C-OLD": "J", "C-NEW": "K"}
+    assert {r.consult_id: r.physician_id for r in baseline.recommendations} == {
+        "C-OLD": "K"
+    }  # arrival order: K takes C-OLD first, so C-NEW (not overdue) cannot use J
+
+
+def test_overflow_can_be_switched_off():
+    cfg = config(trap={"overflow_outside_scope": False})
+    result, _, problem = scoped(scoped_joiner(), cfg)
+
+    assert pairs(result) == {}
+    assert not any(e.overflow for e in problem.edges.values())
+
+
+# Day/night low-volume threshold without a day/night roster role -------------------------
+
+
+def test_day_night_threshold_comes_from_the_shift_start_when_the_role_is_missing():
+    from datetime import UTC, datetime
+
+    from app.engines.optimization.routing.problem import role_threshold
+
+    cfg = OptimizationConfig()
+    evening = datetime(2031, 6, 3, 23, 30, tzinfo=UTC)  # 18:30 CDT
+    morning = datetime(2031, 6, 3, 13, 0, tzinfo=UTC)  # 08:00 CDT
+    chicago = "America/Chicago"
+
+    assert role_threshold(None, cfg, shift_start=evening, tz=chicago) == (4, True)  # night
+    assert role_threshold("Float", cfg, shift_start=morning, tz=chicago) == (6, True)  # day
+    assert role_threshold("Day", cfg, shift_start=evening, tz=chicago) == (6, True)  # role wins
+    assert role_threshold(None, cfg) == (6, False)  # nothing known: day, flagged
+
+
+def test_an_on_shift_physician_without_a_role_gets_a_stated_threshold():
+    s = two_hospitals().doctor("P1", ["H1"], role=None)
+    s.consult("C1", "H1")
+    result, _, _ = dispatch(s)
+    (row,) = [p for p in result.physicians if p.physician_id == "P1"]
+
+    assert row.low_volume is True and row.low_volume_threshold == 6  # 06:00 CDT start: day
+    assert any("from the shift start" in u for u in row.uncertainty)
+
+
+def test_equal_cost_goes_to_whoever_answered_longest_ago_even_after_50_minutes():
+    # Both have 3 consults; P2's last call ended 120 min ago, P1's 60 min ago. The recency
+    # cost is 0 for both (it only spans 50 min), so the tie-break must still prefer P2.
+    s = two_hospitals().doctor("P1", ["H1"]).doctor("P2", ["H1"])
+    s.history("P1", "H1", 3, last_call_end=-60).history("P2", "H1", 3, last_call_end=-120)
+    s.consult("C1", "H1")
+    result, baseline, _ = dispatch(s)
+
+    assert pairs(result) == {"C1": "P2"}
+    assert {r.consult_id: r.physician_id for r in baseline.recommendations} == {"C1": "P2"}
+
+
+def test_a_very_large_routing_round_still_solves():
+    # 80 waiting consults across every urgency tier: once exact lexicographic costs no longer
+    # fit in int64 the solver uses approximate priorities instead of failing (HTTP 500).
+    s = two_hospitals()
+    for j in range(10):
+        s.doctor(f"P{j}", ["H1", "H2"])
+    for i in range(80):
+        ctype = "Stroke" if i % 2 else "General Neuro"
+        age = i % 25
+        s.consult(f"C{i:02d}", "H1" if i % 3 else "H2", ctype, received=-age - 2, triaged=-age - 1)
+    result, _, problem = dispatch(s)
+
+    assert len(problem.consults) == 80
+    assert any("approximate priorities" in n for n in result.solver.notes)
+    assert len(result.plan.recommendations) == 10  # one new consult per free physician
+    placed = {r.consult_id for r in result.plan.recommendations}
+    top = sorted(problem.consults, key=lambda c: (-c.tier, -c.wait_key))[0]
+    assert top.consult_id in placed  # the most urgent consult is never the one left out

@@ -135,9 +135,18 @@ export function SystemStatusProvider({
   useEffect(() => {
     if (typeof EventSource === "undefined") return; // polling still keeps views fresh
     const source = new EventSource(`${API_BASE_URL}/api/live`);
+    // The server ends each stream after ~20 s on purpose and the browser reconnects on its
+    // own (readyState CONNECTING), firing `error` first: that is normal. Live updates are
+    // only unavailable once the stream is closed for good, or after repeated failures
+    // without a single message in between.
+    let failures = 0;
     source.onopen = () => setLive("connected");
-    source.onerror = () => setLive("unavailable");
+    source.onerror = () => {
+      failures += 1;
+      if (source.readyState === EventSource.CLOSED || failures >= 3) setLive("unavailable");
+    };
     source.addEventListener("versions", (event) => {
+      failures = 0;
       setLive("connected");
       const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowSummary;
       const signature = [

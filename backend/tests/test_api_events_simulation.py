@@ -104,6 +104,77 @@ def test_csv_events_can_be_appended_in_dataset_format(loaded_client):
     assert _consult(loaded_client, "CSV-C1")["consult_type"] == "Stroke"
 
 
+HEADER = (
+    "event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,description\n"
+)
+
+
+def test_csv_append_stores_valid_rows_and_reports_invalid_ones(loaded_client):
+    before = loaded_client.get("/api/events", params={"limit": 1}).json()["total"]
+    csv = (
+        HEADER
+        + "CSV-2,2030-05-14T17:29:50-04:00,2030-05-14T21:29:52Z,CSV-C2,consult_received,,DEV-H02,"
+        "Stroke consult request received\n"
+        "CSV-BAD,not-a-time,2030-05-14T21:29:52Z,CSV-C2,consult_triaged,,DEV-H02,Consult triaged\n"
+        "CSV-3,2030-05-14T17:29:55-04:00,2030-05-14T21:29:56Z,CSV-C3,consult_received,,DEV-H02,"
+        "Stroke consult request received\n"
+    )
+    response = loaded_client.post("/api/events/csv", files={"file": ("judge.csv", csv.encode())})
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["received"], body["accepted"], body["rejected"]) == (3, 2, 1)
+    statuses = {o["event_id"]: o["status"] for o in body["outcomes"]}
+    assert statuses == {"CSV-2": "accepted", "CSV-BAD": "rejected", "CSV-3": "accepted"}
+    assert _consult(loaded_client, "CSV-C3")["consult_type"] == "Stroke"
+    assert loaded_client.get("/api/events", params={"limit": 1}).json()["total"] == before + 2
+    rejections = loaded_client.get("/api/events/rejections").json()["items"]
+    assert any(r["event_id"] == "CSV-BAD" for r in rejections)
+
+
+def test_csv_append_with_no_valid_row_stores_nothing(loaded_client):
+    csv = HEADER + "CSV-BAD,not-a-time,2030-05-14T21:29:52Z,X,consult_received,,DEV-H02,x\n"
+    response = loaded_client.post("/api/events/csv", files={"file": ("bad.csv", csv.encode())})
+
+    assert response.status_code == 422
+    assert "no row passed validation" in response.json()["error"]["message"]
+
+
+def test_unquoted_comma_in_description_is_joined_back_into_the_description(loaded_client):
+    csv = (
+        HEADER
+        # one unquoted comma in the description, and a status quoted with ' among other rows
+        + "CSV-4,2030-05-14T17:29:50-04:00,2030-05-14T21:29:52Z,CSV-C4,consult_received,,DEV-H02,"
+        "Stroke consult request received, hospital calling again\n"
+        "CSV-5,2030-05-14T17:29:51-04:00,2030-05-14T21:29:52Z,,physician_status_changed,DEV-P01,,"
+        "Self-reported status: 'Available'\n"
+        "CSV-6,2030-05-14T17:29:52-04:00,2030-05-14T21:29:52Z,CSV-C4,consult_triaged,,DEV-H02,"
+        '"Consult triaged, quoted"\n'
+    )
+    response = loaded_client.post("/api/events/csv", files={"file": ("judge.csv", csv.encode())})
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["accepted"], body["rejected"]) == (3, 0)
+    events = loaded_client.get("/api/events", params={"consult_id": "CSV-C4"}).json()["items"]
+    descriptions = {e["event_id"]: e["description"] for e in events}
+    assert descriptions["CSV-4"] == "Stroke consult request received, hospital calling again"
+    assert descriptions["CSV-6"] == "Consult triaged, quoted"
+    assert _consult(loaded_client, "CSV-C4")["consult_type"] == "Stroke"
+
+
+def test_semicolon_delimited_csv_is_still_read(loaded_client):
+    csv = (
+        HEADER.replace(",", ";")
+        + "CSV-7;2030-05-14T17:29:50-04:00;2030-05-14T21:29:52Z;CSV-C7;consult_received;;DEV-H02;"
+        "Stroke consult request received\n"
+    )
+    response = loaded_client.post("/api/events/csv", files={"file": ("semi.csv", csv.encode())})
+
+    assert response.status_code == 201, response.text
+    assert response.json()["accepted"] == 1
+
+
 # 11. Invalid event payload returns a descriptive error ---------------------------------
 
 

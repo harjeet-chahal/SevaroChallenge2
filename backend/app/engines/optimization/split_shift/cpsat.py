@@ -109,7 +109,8 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
                 vars_.append(v)
             m.add(sum(vars_) == x[o.index])
 
-    deficit_terms, excess_terms = [], []
+    deficit_terms, excess_terms, required_terms = [], [], []
+    gap_hospitals = set(ctx.gap_hospitals)
     for k, piece in enumerate(pieces):
         y = sum(z[(i, piece.hospital_id)] for i in piece.covering)
         d = m.new_int_var(0, piece.base_deficit, f"d_{k}")
@@ -119,9 +120,13 @@ def solve_cpsat(ctx: PlanningContext, options: list[Option]) -> StaffingSolution
         else:
             m.add(d == piece.base_deficit)
         deficit_terms.append(piece.seconds * d)
+        if piece.hospital_id in gap_hospitals:
+            required_terms.append(piece.seconds * d)
     deficit_expr = sum(deficit_terms) if deficit_terms else 0
-    if st.require_full_coverage and deficit_terms:
-        m.add(deficit_expr == 0)
+    if st.require_full_coverage and required_terms:
+        # Only the hospitals short within the look-ahead must be fully covered; later gaps
+        # are not acted on yet, so they cannot make the plan infeasible.
+        m.add(sum(required_terms) == 0)
 
     rank = _rank(options)
     objectives = {

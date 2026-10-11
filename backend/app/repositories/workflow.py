@@ -16,7 +16,11 @@ from app.db.models import (
     OfferResponseRecord,
 )
 from app.engines.interventions.overlay import OverlayEntry
+from app.engines.optimization.split_shift.candidates import Decline
 from app.schemas.offer import OfferStatus
+
+ALL_IMPORTS = object()
+"""Sentinel for offer counters: count offers from every dataset import."""
 
 _OVERLAY_STATUSES = (
     OfferStatus.ACCEPTED.value,
@@ -121,11 +125,25 @@ class WorkflowRepository:
             )
         )
 
+    def _offers_in(self, import_id: str | None | object, *where) -> list[OfferRecord]:
+        stmt = select(OfferRecord).where(*where)
+        if import_id is not ALL_IMPORTS:
+            stmt = stmt.join(
+                InterventionRecord, InterventionRecord.id == OfferRecord.intervention_id
+            ).where(InterventionRecord.dataset_import_id == import_id)
+        return list(self.session.scalars(stmt.order_by(OfferRecord.id)))
+
     def offer_counts(
-        self, physician_id: str, as_of: datetime, window: timedelta
+        self,
+        physician_id: str,
+        as_of: datetime,
+        window: timedelta,
+        import_id: str | None | object = ALL_IMPORTS,
     ) -> tuple[int, int, int]:
-        """(open sent offers, committed accepted/active shifts, offers sent in the window)."""
-        offers = self.offers_for_physician(physician_id)
+        """(open sent offers, committed accepted/active shifts, offers sent in the window).
+        Pass the active ``import_id``: offers made under an earlier import of the dataset
+        (e.g. a rehearsal before a re-import) are not part of this day."""
+        offers = self._offers_in(import_id, OfferRecord.physician_id == physician_id)
         open_ = sum(o.status == OfferStatus.SENT.value for o in offers)
         committed = sum(
             o.status in (OfferStatus.ACCEPTED.value, OfferStatus.ACTIVE.value) for o in offers
@@ -133,11 +151,15 @@ class WorkflowRepository:
         week = sum(as_of - window < o.sent_at <= as_of for o in offers)
         return open_, committed, week
 
-    def offer_log(self, as_of: datetime, window: timedelta) -> dict[str, tuple[int, int]]:
-        """physician_id -> (open offers + committed split shifts, offers sent in window)."""
+    def offer_log(
+        self, as_of: datetime, window: timedelta, import_id: str | None | object = ALL_IMPORTS
+    ) -> dict[str, tuple[int, int]]:
+        """physician_id -> (open offers + committed split shifts, offers sent in window), for
+        the given dataset import (see ``offer_counts``)."""
         log: dict[str, tuple[int, int]] = {}
-        rows = self.session.scalars(select(OfferRecord).where(OfferRecord.sent_at <= as_of))
-        for o in rows:
+        # Open offers count whatever the clock says (after a clock move backwards they still
+        # exist); the weekly count uses the rolling window ending at ``as_of``.
+        for o in self._offers_in(import_id):
             open_, week = log.get(o.physician_id, (0, 0))
             if o.status in (
                 OfferStatus.SENT.value,
@@ -148,6 +170,33 @@ class WorkflowRepository:
             if as_of - window < o.sent_at <= as_of:
                 week += 1
             log[o.physician_id] = (open_, week)
+        return log
+
+    def declines(self, as_of: datetime, import_id: str | None) -> dict[str, list[Decline]]:
+        """physician_id -> offers they declined in this dataset, up to ``as_of``."""
+        stmt = (
+            select(OfferRecord)
+            .join(InterventionRecord, InterventionRecord.id == OfferRecord.intervention_id)
+            .where(
+                InterventionRecord.dataset_import_id == import_id,
+                OfferRecord.status == OfferStatus.DECLINED.value,
+                OfferRecord.responded_at.is_not(None),
+            )
+            .order_by(OfferRecord.id)
+        )
+        log: dict[str, list[Decline]] = {}
+        for o in self.session.scalars(stmt):
+            assert o.responded_at is not None
+            if o.responded_at > as_of:
+                continue
+            log.setdefault(o.physician_id, []).append(
+                Decline(
+                    offer_id=o.id,
+                    hospital_ids=tuple(o.hospital_ids),
+                    declined_at=o.responded_at,
+                    until=o.end_at,
+                )
+            )
         return log
 
     def overlay_entries(self, import_id: str | None) -> list[OverlayEntry]:

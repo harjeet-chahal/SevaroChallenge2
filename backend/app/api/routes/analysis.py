@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from pydantic import AwareDatetime
 
 from app.api.deps import AppSettings, Cache, DbSession
 from app.core.errors import NotFoundError
@@ -17,12 +16,13 @@ from app.schemas.coverage import CoverageReport, HospitalCoverage
 from app.schemas.demand import DemandReport
 from app.schemas.metrics import OperationalMetrics
 from app.schemas.optimization import OptimizationInput
+from app.schemas.simulation import SupportedDatetime
 from app.services.analysis import AnalysisService
 
 router = APIRouter(tags=["analysis"])
 
 AsOf = Annotated[
-    AwareDatetime | None,
+    SupportedDatetime | None,
     Query(
         description="Analyse at this time (ISO-8601 with offset). Defaults to the simulation clock."
     ),

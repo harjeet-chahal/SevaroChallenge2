@@ -34,14 +34,22 @@ file pointed to by `RISK_RULES_FILE`. Each rule is tagged **from the brief** or
 
 Thresholds use **≥**: an alert fires *at* the documented minute, never a second
 before (tested to the second). Stage clocks start at stage entry. The note clock starts
-at the latest Note Pending entry (the end of video or call) and keeps running through
-Documentation. Consults of unknown type are evaluated only against "All" standards, and
-this is stated in `notes`. Not alerted, because the brief gives no rule: "Received, not
-yet triaged" and ringing phones.
+at the Note Pending entry of the current note phase (the end of the video or call that
+ended the clinical work; a provisional Note Pending that imaging or video later superseded
+never counts) and keeps running through Documentation. Consults of unknown type are
+evaluated only against "All" standards, and this is stated in `notes`. "Received, not yet
+triaged" has no standard, unless routing has visibly started (a ring or a failed routing
+attempt): the consult is then timed against "Triaged, not yet assigned" from the first
+routing activity. Notes still open after a shift has ended stay flagged as critical, and a
+consult owned by a physician whose shift ended is flagged even if that physician is still
+on another call (not if the call is for that consult). A current gap's start is not known
+from the forward-looking forecast, so its alert has no "since" time.
 
 Recommended action categories (never executed): `reassign_consult`, `escalate`,
 `contact_physician`, `propose_split_shift`, `monitor`, mapped per rule and severity in the
-config.
+config. A reassignment is recommended only if another credentialed on-shift physician is
+free to take the consult now (available, not ringing for another call); otherwise the alert
+recommends `escalate` and names who was checked and why each cannot take it.
 
 **Identity.** `alert_id = RULE_CODE:entity_kind:entity_id` (e.g.
 `STAGE_TRIAGED_UNASSIGNED:consult:DEV-C109`). It is stable while the issue persists, even
@@ -54,13 +62,15 @@ Lexicographic key, most significant first (`alert_detection/rank.py`):
 1. **severity** — critical, warning, info (hard safety precedence)
 2. **category** — 0 stroke consult at risk · 1 coverage gap now · 2 other consult at risk ·
    3 projected gap · 4 open notes near shift end · 5 demand spike · 6 signal conflict
-3. **urgency** — time rules: elapsed ÷ critical standard; projected gaps: imminence;
+3. **repeat calls** — the hospital called again about this consult (same patient,
+   counted once, clock not restarted): more repeat calls first, as the brief asks
+4. **urgency** — time rules: elapsed ÷ critical standard; projected gaps: imminence;
    current gaps: deficit physician-minutes
-4. **coverage risk** — the alert's hospital has a gap now (2) / projected (1) / none (0)
-5. **affected** — consults or items touched
-6. `alert_id` — stable tie-break
+5. **coverage risk** — the alert's hospital has a gap now (2) / projected (1) / none (0)
+6. **affected** — consults or items touched
+7. `alert_id` — stable tie-break
 
-Workload factors (3–5) can never lift an alert above a higher severity or a more
+Workload factors (3–6) can never lift an alert above a higher severity or a more
 safety-critical category. Every alert returns `priority`, the structured `rank` and
 `priority_reasons` in words.
 
@@ -178,8 +188,8 @@ import, or a clock move always recomputes.
 - Severities for gap, spike, signal, routing-failure and assigned-unavailable alerts.
 - The spike window is half-open (an arrival exactly 60 min ago no longer counts), and
   the spike comparison is strictly greater.
-- The note clock runs from the latest Note Pending entry. Phone-only Note Pending is
-  inferred from the call end (Phase 2).
+- The note clock runs from the Note Pending entry of the current note phase. Phone-only
+  Note Pending is inferred from the call end (Phase 2).
 - Overlapping coverage blocks use the maximum requirement. A hospital with no block at a
   time has "no requirement" and so no gap.
 - Off-shift physicians are counted from `next_shift_starts_at` with an unknown end.

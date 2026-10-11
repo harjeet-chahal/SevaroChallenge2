@@ -19,7 +19,8 @@ Lexicographic costs (implementation choice), with n consults and W the largest e
 so leaving one consult of a higher urgency tier unassigned is never traded for any number
 of lower-tier assignments, and within a tier the longer-waiting consult wins contention.
 Workload/fairness edge costs then pick *who* takes each consult. A final tie-break term
-(scaled below one unit) prefers the lower physician id, so ties are stable.
+(scaled below one unit) prefers whoever answered longest ago (brief rule 4; the recency
+cost only spans the last 50 minutes), then the lower physician id, so ties are stable.
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ from app.engines.optimization.solvers import load_min_cost_flow
 from app.schemas.dispatch import SolverRun
 
 MAX_SAFE_COST = 2**62
+FLOW_COST_LIMIT = 2**60
+"""OR-Tools min-cost flow refuses (BAD_COST_RANGE) once max arc cost × node count passes
+about 3.7e18 (measured); 2**60 keeps a margin."""
 WAIT_BUCKETS = (1, 5, 15, 60, 10**9)
 
 
@@ -41,16 +45,30 @@ class Penalties:
     unassigned: dict[str, int]
     wait_bucket_minutes: int
     scale: int
+    exact: bool = True
+    """False when the problem is too large for exact lexicographic costs in int64: a
+    higher-tier consult then still beats a lower-tier one one-for-one, not any number."""
 
 
 def penalties(problem: DispatchProblem) -> Penalties:
-    """Unassigned penalties U(c), coarsening waiting time only if int64 would overflow."""
+    """Unassigned penalties U(c), coarsening waiting time only if int64 would overflow, and
+    falling back to approximate (still tier-ordered) penalties for very large problems."""
     consults = problem.consults
     n = max(1, len(consults))
     w = problem.max_edge_cost
     tiers = sorted({c.tier for c in consults})
     rank = {t: i for i, t in enumerate(tiers)}
     cap = problem.config.weights.wait_cap_minutes
+    k_scale = n * max(1, len(problem.physicians)) + 1
+    # OR-Tools scales arc costs by the node count internally, and the objective sums n terms.
+    nodes = n + len(problem.physicians) + 2
+
+    def fits(u: dict[str, int]) -> bool:
+        if not u:
+            return True
+        top = max(u.values()) * k_scale
+        return top * (nodes + 1) < FLOW_COST_LIMIT and top * n < MAX_SAFE_COST
+
     for bucket in WAIT_BUCKETS:
         s = n * w + 1
         wmax = cap // bucket
@@ -58,10 +76,15 @@ def penalties(problem: DispatchProblem) -> Penalties:
         for _ in tiers[1:]:
             bases.append(n * (bases[-1] + (wmax + 1) * s + w) + 1)
         u = {c.consult_id: bases[rank[c.tier]] + (c.wait_key // bucket + 1) * s for c in consults}
-        k_scale = n * max(1, len(problem.physicians)) + 1
-        if not u or max(u.values()) * n * k_scale < MAX_SAFE_COST:
+        if fits(u):
             return Penalties(u, bucket, s)
-    raise OverflowError("dispatch problem too large for exact lexicographic costs")
+    s = w + 1
+    wmax = cap
+    bases = [0]
+    for _ in tiers[1:]:
+        bases.append(bases[-1] + (wmax + 1) * s + w + 1)
+    u = {c.consult_id: bases[rank[c.tier]] + (c.wait_key + 1) * s for c in consults}
+    return Penalties(u, 1, s, exact=False)
 
 
 def objective(problem: DispatchProblem, pairs: dict[str, str], pen: Penalties) -> int:
@@ -104,7 +127,7 @@ def solve_min_cost_flow(problem: DispatchProblem) -> tuple[dict[str, str], Solve
             notes=["No consult needs dispatch at this time."],
         )
     physicians = sorted({pid for (_, pid) in problem.edges})
-    p_rank = {pid: i for i, pid in enumerate(physicians)}
+    p_rank = {pid: i for i, pid in enumerate(sorted(physicians, key=problem.recency_key))}
     k_scale = n * max(0, len(physicians) - 1) + 1
     fair = problem.config.weights.per_additional_sync_consult
     flow = module.SimpleMinCostFlow()
@@ -137,9 +160,14 @@ def solve_min_cost_flow(problem: DispatchProblem) -> tuple[dict[str, str], Solve
         }
         raise RuntimeError(f"min-cost flow failed: {names.get(status, status)}")
     pairs = {arcs[a][0]: arcs[a][1] for a in arcs if flow.flow(a) > 0}
-    notes = [
-        f"Exact optimum of the lexicographic cost (scaled objective {flow.optimal_cost()}).",
-    ]
+    notes = (
+        [f"Exact optimum of the lexicographic cost (scaled objective {flow.optimal_cost()})."]
+        if pen.exact
+        else [
+            f"{n} consults is too many for exact lexicographic costs: approximate priorities "
+            "were used (a more urgent consult still beats a less urgent one, one for one)."
+        ]
+    )
     if pen.wait_bucket_minutes > 1:
         notes.append(f"Waiting time bucketed to {pen.wait_bucket_minutes} min to fit int64.")
     return pairs, SolverRun(
@@ -191,7 +219,11 @@ def solve_baseline(problem: DispatchProblem) -> dict[str, str]:
     never = datetime.min.replace(tzinfo=UTC)
     pairs: dict[str, str] = {}
     for c in sorted(problem.consults, key=lambda c: c.queue_key):
-        options = [e.physician_id for e in problem.edges_for(c.consult_id) if left[e.physician_id]]
+        open_edges = [e for e in problem.edges_for(c.consult_id) if left[e.physician_id]]
+        # Overflow (outside a split-shift scope) only when no regular option is left.
+        options = [e.physician_id for e in open_edges if not e.overflow] or [
+            e.physician_id for e in open_edges
+        ]
         if not options:
             continue
 
