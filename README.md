@@ -1,6 +1,6 @@
 # Sevaro Pulse: Tele-Neurology Operations Command Center
 
-### AWS Deployment [Link] : http://34.194.72.255/
+### Video Demo [Link] : https://youtu.be/NKqWVpLLpUA?si=E7BHrb9JixFUqIes
 
 A hackathon build for the Rutgers Health Hack (Sevaro Challenge 2). It **detects**
 coverage risk across a tele-neurology network, helps operations **decide** on an
@@ -9,6 +9,12 @@ off-shift physicians.
 
 No patient information is stored or displayed, and no real SMS,
 email or hospital integration exists.
+
+## Screenshots
+
+![Landing page: simulation clock, live alert and gap counts, and the three roles](docs/images/landing.webp)
+
+![Command center: network KPIs, ranked alerts and the priority-one alert with its recommended action](docs/images/command-center.webp)
 
 ## Repository layout
 
