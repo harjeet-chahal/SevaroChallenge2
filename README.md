@@ -112,18 +112,6 @@ cd backend && .venv/bin/pytest && .venv/bin/ruff check . && .venv/bin/ruff forma
 cd frontend && npx tsc --noEmit && npm run lint && npm run build
 ```
 
-## Demo
+## Team
 
-Voluntary availability (load **workflow sample**; details in
-[docs/voluntary-availability.md](docs/voluntary-availability.md)):
-
-1. **Coordinator**: select *Ridge Sample Clinic: coverage gap now*. *Who to ask first*
-   ranks Dr. Vale Surge #1 and Dr. Yara Surge #2.
-2. **Physician**, signed in as Dr. Yara Surge: **I'm Available** → **Next 4 h** →
-   **Share availability**. The phone says she has not been assigned a shift.
-3. **Coordinator** (refreshes live): Yara is #1 with **Voluntarily Available** and
-   *Up from #2*. Her coverage is within 15% of Vale's, and she has already said yes.
-4. **Propose split shift**: Yara is the proposed physician. The drawer shows why she moved
-   up and the cost (same $800 as Vale, $400 less than the manual heuristic, all marked
-   *Simulated*). Submit for clinical-lead approval and continue as in Phase 5. Withdrawing
-   the availability puts Vale back first.
+Harjeet, Juvana, Navneet, Isha
