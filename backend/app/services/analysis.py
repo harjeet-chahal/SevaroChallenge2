@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.engines.analysis import OperationalAnalysis, analyze
+from app.engines.optimization import load_optimization_config
+from app.engines.optimization.split_shift.candidates import stranded_urgent_consults
 from app.engines.rules import RiskConfig, load_risk_config
 from app.services.state import StateService
 
@@ -68,7 +70,10 @@ class AnalysisService:
         horizon = horizon_minutes or config.coverage.horizon_minutes
         step = step_minutes or config.coverage.chart_step_minutes
         version = self.states.simulation.data_version()
-        key = (version, moment.isoformat(), horizon, step, config.signature())
+        # Stranded urgent consults (routing finds no one on duty) count in the forecast; the
+        # routing and staffing policy lives in the optimization config.
+        policy = load_optimization_config(self.settings.resolved_optimization_policy_file)
+        key = (version, moment.isoformat(), horizon, step, config.signature(), policy.signature())
         cached = self.cache.get(key)
         if cached is not None:
             return cached
@@ -82,6 +87,7 @@ class AnalysisService:
             horizon_minutes=horizon,
             step_minutes=step,
             overlay=self.states.overlay(),
+            stranded=lambda first: stranded_urgent_consults(first, policy),
         )
         self.cache.put(key, result)
         return result

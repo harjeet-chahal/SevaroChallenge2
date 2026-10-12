@@ -39,6 +39,7 @@ from app.engines.coverage_prediction import (
     build_coverage_models,
     hypothetical_window,
 )
+from app.engines.event_processing import normalize_label
 from app.engines.optimization.config import OptimizationConfig
 from app.engines.optimization.ordering import natural_key
 from app.engines.timeline import fmt_local, fmt_local_datetime
@@ -92,6 +93,9 @@ class PlanningContext:
     """physician_id -> declined offers in the current dataset (Phase 5 offer log)."""
     availability: dict[str, list[AvailabilityWindow]] = field(default_factory=dict)
     """physician_id -> active voluntary availability windows (off-shift portal)."""
+    stranded: dict[str, list[str]] = field(default_factory=dict)
+    """hospital_id -> urgent consults the routing optimizer cannot place right now (see
+    ``StaffingPolicy.stranded_urgent_categories``); each adds to that hospital's need."""
 
     def window_for(
         self, physician_id: str, start: datetime, end: datetime
@@ -141,8 +145,17 @@ def build_planning_context(
     models = build_coverage_models(
         state, analysis.reference, analysis.demand_models, analysis.config.coverage, horizon
     )
-    base = {hid: round(m.deficit_physician_minutes(), 4) for hid, m in models.items()}
     lookahead_end = state.as_of + timedelta(minutes=lookahead)
+    # The same consults the dashboard forecast counted, when the analysis already checked.
+    stranded = (
+        analysis.stranded
+        if analysis.stranded is not None
+        else stranded_urgent_consults(analysis, cfg)
+    )
+    for hid, consult_ids in stranded.items():
+        if hid in models:
+            models[hid].add_stranded(consult_ids, lookahead_end)
+    base = {hid: round(m.deficit_physician_minutes(), 4) for hid, m in models.items()}
     first_gap = {
         hid: min(a for a, _, d in m.deficit_profile() if d > 0)
         for hid, m in models.items()
@@ -167,7 +180,66 @@ def build_planning_context(
         tz=tz,
         lookahead_minutes=lookahead,
         later_gaps=later,
+        stranded={hid: ids for hid, ids in stranded.items() if hid in models},
     )
+
+
+def stranded_urgent_consults(
+    analysis: OperationalAnalysis, cfg: OptimizationConfig
+) -> dict[str, list[str]]:
+    """hospital_id -> urgent consults (``stranded_urgent_categories``) that need a physician
+    and that the routing optimizer leaves unplaced: no eligible on-shift physician now.
+
+    Only consults that already have an alert (past a standard, or routing failed) count, and
+    not while a credentialed physician is held back only by something that clears within
+    minutes (the 2-minute call cool-down, or a phone ringing for another call)."""
+    categories = {normalize_label(c) for c in cfg.staffing.stranded_urgent_categories}
+    if not categories:
+        return {}
+    # Imported here: routing and split_shift are siblings; keep their imports one-way.
+    from app.engines.optimization.routing import (
+        build_dispatch_problem,
+        solve_dispatch,
+        solve_greedy,
+    )
+    from app.engines.optimization.solvers import SolverUnavailableError
+
+    problem = build_dispatch_problem(analysis, cfg)
+    urgent = [
+        c
+        for c in problem.consults
+        if c.hospital_id is not None
+        and c.category is not None
+        and normalize_label(c.category) in categories
+        and c.severity is not None
+        and not any(
+            _transiently_blocked(problem.physicians[pid])
+            for pid in problem.credentialed_on_shift.get(c.consult_id, [])
+            if pid != c.current_physician_id
+        )
+    ]
+    if not urgent:
+        return {}
+    try:
+        pairs, _, _ = solve_dispatch(problem)
+    except SolverUnavailableError:
+        # Detection only (the forecast must not fail): the greedy plan places at least as
+        # few consults, so it can only over-report, and the optimizer still reports its error.
+        pairs, _ = solve_greedy(problem)
+    out: dict[str, list[str]] = {}
+    for c in urgent:
+        if c.consult_id not in pairs:
+            out.setdefault(c.hospital_id, []).append(c.consult_id)
+    return {hid: sorted(ids, key=natural_key) for hid, ids in sorted(out.items())}
+
+
+_TRANSIENT_CHECKS = frozenset({"call_cooldown", "not_ringing"})
+
+
+def _transiently_blocked(view) -> bool:
+    """Excluded only by checks that clear within minutes: soon able to take a consult."""
+    failed = {chk.code for chk in view.checks if not chk.passed}
+    return bool(failed) and failed <= _TRANSIENT_CHECKS
 
 
 @dataclass

@@ -511,7 +511,27 @@ def build_dispatch_problem(
             unavailable = assignee is not None and (
                 assignee.availability is Availability.UNAVAILABLE or not assignee.on_shift
             )
-            if unavailable and r.reassign_unavailable_assignee and c.stage in r.reassignable_stages:
+            sev_now = severity.get(c.consult_id)
+            stalled = (
+                r.reassign_stalled_assignment
+                and not unavailable
+                and assignee is not None
+                and assignee.availability is Availability.BUSY
+                and c.stage is ConsultStage.ASSIGNED
+                and sev_now is not None
+                and SEVERITY_LEVEL[sev_now] >= SEVERITY_LEVEL[Severity(r.stalled_min_severity)]
+            )
+            if stalled:
+                kind = "reassign"
+                busy_with = assignee.activity.value.replace("_", " ")
+                reason = (
+                    f"assigned to {assignee.display_name} {c.seconds_in_stage // 60} min ago, "
+                    f"hospital not yet contacted ({sev_now.value} alert), and "
+                    f"{assignee.display_name} is now busy ({busy_with})"
+                )
+            elif (
+                unavailable and r.reassign_unavailable_assignee and c.stage in r.reassignable_stages
+            ):
                 kind = "reassign"
                 state_txt = (
                     "Temporarily Unavailable"
@@ -590,7 +610,7 @@ def build_dispatch_problem(
             if c.pinned_physician_id is not None and pid != c.pinned_physician_id:
                 reasons.append(f"call already ringing to {views[c.pinned_physician_id].name}")
             if pid == c.current_physician_id:
-                reasons.append("currently assigned (unavailable)")
+                reasons.append("currently assigned (the consult is being moved away)")
             overflow = c.hospital_id not in v.scope and cfg.trap.overflow_outside_scope and overdue
             if c.hospital_id not in v.scope and not overflow:
                 reasons.append("outside routing scope (split-shift protection)")

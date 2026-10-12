@@ -58,6 +58,26 @@ over 240 minutes so they are long enough. On the official data:
   Northfield's 20:00 gap.
 - From 19:31: Dr. Ben Alvarez (PHY-010) also qualifies, for Redwood's 21:00 gap.
 
+**Post-submission change (2026-10-11, branch `post-submission/stroke-gaps`).** The judges'
+test file (`c2_new_events.csv`, checked at 18:27) exposed the gap left by point 5: at
+Suncrest two strokes (CON-2114, CON-2120) waited while every credentialed doctor was busy,
+and the split-shift panel said nobody was needed. The planner now treats a stroke consult
+that routing cannot place as a shortage at its hospital, right away
+(`staffing.stranded_urgent_categories`, see [optimization.md](optimization.md) §2.2 and
+[risk-and-coverage.md](risk-and-coverage.md) §4). The dashboard forecast and the split-shift
+planner both count it. The capacity figures above are unchanged with the rule switched
+off, and the tests marked "capacity only" still pin them. On the official data:
+
+- 18:20: Suncrest (CON-2114), Oak Valley (CON-2105) and Harbor (CON-2110) are short now,
+  on the coverage cards and in the "Coverage gaps" tile.
+  **Dr. Grace Okafor is the only off-shift physician who can be asked** (Suncrest and Oak
+  Valley; she is not credentialed at Harbor). This now matches the handbook's "exactly
+  one".
+- 18:27 with the judges' file: Williams is back and takes CON-2105, and Patel is free, so
+  routing proposes moving CON-2110 to her (`routing.reassign_stalled_assignment`). Suncrest
+  is the one short hospital (card: 3 available vs 5 required, "Gap now (−2)"), and Okafor
+  is proposed for it.
+
 ## 1. Base dataset validation
 
 | Check | Result |

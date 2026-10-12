@@ -56,6 +56,12 @@ class RoutingPolicy(BaseModel):
         ]
     )
     """ASSUMPTION: notes stay with their author, so Note Pending/Documentation are not moved."""
+    reassign_stalled_assignment: bool = True
+    """ASSUMPTION: also recommend (never execute) moving a consult still in Assigned (the
+    hospital was never contacted) once it has an alert of at least ``stalled_min_severity``
+    and its physician is busy with other work. Waiting for them would leave the consult past
+    the standard, so another eligible physician is proposed for the coordinator to approve."""
+    stalled_min_severity: Literal["warning", "critical"] = "critical"
 
 
 class DispatchWeights(BaseModel):
@@ -136,6 +142,14 @@ class StaffingPolicy(BaseModel):
     split-shift purposes only if its coverage gap starts within this many minutes. None =
     the dashboard's coverage forecast window (90 min by default, the brief's minimum), so
     the dashboard and the split-shift rules always agree on which hospitals are short."""
+    stranded_urgent_categories: list[str] = Field(default_factory=lambda: ["stroke"])
+    """ASSUMPTION: capacity counts busy physicians, so a hospital whose credentialed
+    physicians are all busy can look covered while its consults wait. For split-shift
+    purposes a hospital is also short *now* while a consult of these categories needs a
+    physician and the routing optimizer cannot place it (no eligible on-shift physician).
+    With n such consults, the hospital needs at least n physicians beyond those on duty
+    there, from now to the end of the shortage look-ahead (or its regular requirement, if
+    higher); it is re-checked as the clock moves. Empty list = off."""
     count_at_all_scope_hospitals: bool = True
     """BRIEF coverage model: a physician counts toward every hospital they are credentialed at.
     Set false to force each proposed physician to cover exactly one hospital (exclusive)."""

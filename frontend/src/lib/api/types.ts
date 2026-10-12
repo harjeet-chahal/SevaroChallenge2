@@ -591,6 +591,8 @@ export interface HospitalCoverage {
   annotations: CoverageAnnotation[];
   contributors: CoverageContributor[];
   explanations: string[];
+  /** Urgent consults no one on duty here can take now; each needs one more physician. */
+  stranded_consult_ids: string[];
 }
 
 export interface CoverageReport {

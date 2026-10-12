@@ -30,10 +30,31 @@ SURGE = SAMPLE_DIR.parent / "synthetic_surge"
 
 
 @pytest.fixture
-def surge(client):
-    response = client.post("/api/datasets/sample", params={"name": "synthetic_surge"})
-    assert response.status_code == 200, response.text
-    return client
+def surge(make_client, tmp_path):
+    """Capacity only (the derivations above): stranded strokes are not counted."""
+    policy = tmp_path / "policy.json"
+    policy.write_text('{"staffing": {"stranded_urgent_categories": []}}', encoding="utf-8")
+    with make_client(optimization_policy_file=policy) as client:
+        response = client.post("/api/datasets/sample", params={"name": "synthetic_surge"})
+        assert response.status_code == 200, response.text
+        yield client
+
+
+def test_stranded_strokes_count_as_one_more_physician_needed_now(client):
+    """Default policy: SRG-C204 (H1: Quinn, Reese, Sawyer all busy) and SRG-C210 (H2: its
+    doctor Temporarily Unavailable, Quinn busy) cannot be placed, so each hospital needs one
+    physician beyond those on duty (A 3 -> R 4 at H1, A 1 -> R 2 at H2) from now."""
+    assert (
+        client.post("/api/datasets/sample", params={"name": "synthetic_surge"}).status_code == 200
+    )
+    report = {h["hospital_id"]: h for h in client.get("/api/coverage").json()["hospitals"]}
+    rows = {
+        hid: (h["stranded_consult_ids"], h["metrics"]["required_now"], h["metrics"]["deficit_now"])
+        for hid, h in report.items()
+    }
+    assert rows["SRG-H1"] == (["SRG-C204"], 4, 1)
+    assert rows["SRG-H2"] == (["SRG-C210"], 2, 1)
+    assert rows["SRG-H3"][0] == []  # General Neuro SRG-C220 is not an urgent category
 
 
 def _coverage(client, hid, **params):

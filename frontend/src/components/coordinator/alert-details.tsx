@@ -118,7 +118,8 @@ function viewIntervention(select: ((id: string) => void) | undefined, id: string
 }
 
 /**
- * For a coverage gap: the backend's ranked physicians for this hospital, top three, so the
+ * For a hospital the split-shift planner counts as short (a coverage gap, or stroke consults
+ * no one on duty can take): the backend's ranked physicians for it, top three, so the
  * coordinator sees who would be asked (and any volunteer who moved up) before proposing.
  */
 function WhoToAsk({ a }: { a: Alert }) {
@@ -126,7 +127,7 @@ function WhoToAsk({ a }: { a: Alert }) {
   const ranking = optimization?.staffing.data?.rankings.find(
     (r) => r.hospital_ids.length === 1 && r.hospital_ids[0] === a.hospital_id,
   );
-  if (!a.hospital_id || !a.rule_code.startsWith("COVERAGE_GAP") || !ranking) return null;
+  if (!a.hospital_id || !ranking) return null;
   if (!ranking.entries.some((e) => e.rank !== null)) return null;
   return (
     <RankedPhysicians

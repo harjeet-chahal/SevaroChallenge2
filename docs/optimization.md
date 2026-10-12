@@ -41,6 +41,7 @@ ineligible physician, because ineligible pairs have no arc at all.
 | Open, unassigned, not triaged but already rung or failed by routing | yes, `assign` (routing evidently started) |
 | Call already ringing to an eligible physician | yes, pinned to that physician (`confirm_ringing`) |
 | Assigned to a Temporarily Unavailable or off-shift physician, before notes | yes, `reassign`, with a disruption cost and labelled as a proposal (ASSUMPTION) |
+| Still Assigned (hospital never contacted) with a critical alert, physician now busy with other work | yes, `reassign`, as a proposal (ASSUMPTION, `routing.reassign_stalled_assignment`) |
 | Assigned to a working physician | **no**: never moved silently (listed under "skipped") |
 | Note Pending / Documentation with an unavailable author | no: notes stay with their author |
 | Received, not yet triaged | no (listed as skipped, with the reason) |
@@ -163,6 +164,17 @@ is (*E* − 7 d, *E*]. Work that might age out before *E* has unknown timing, so
   the split-shift rules agree. Gaps later in the planning window are listed as "not acted
   on yet" and re-checked as the clock moves. See
   [official-scenario-audit.md](official-scenario-audit.md).
+- **Stranded urgent consults (ASSUMPTION, `staffing.stranded_urgent_categories`, default
+  `["stroke"]`):** capacity counts busy physicians, so a hospital whose credentialed
+  physicians are all busy can look covered while its strokes wait. A stroke consult that
+  needs a physician, already has an alert, and that the routing optimizer cannot place
+  makes its hospital short **now**: with *n* such consults the hospital needs at least *n*
+  physicians beyond those on duty there, until the end of the look-ahead (re-checked every
+  clock move). It does not apply while a credentialed physician is held back only by the
+  2-minute call cool-down or a phone ringing for another call. Only the split-shift
+  planner reuses the consults the dashboard forecast already counted
+  ([risk-and-coverage.md](risk-and-coverage.md) §4), so both show the same short hospitals.
+  `[]` switches it off.
 - **Planning window:** 240 min (CHOICE; offers last ≥ 2 h), used to choose offer starts
   and lengths and to value them. It is computed with the **same Phase 3 coverage engine**
   as the dashboard.

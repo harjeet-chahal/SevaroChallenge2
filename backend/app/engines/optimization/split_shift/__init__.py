@@ -627,6 +627,15 @@ def run_staffing(
             f"{ctx.horizon_minutes}-min planning window, including later gaps: "
             f"{before_total:g} physician-minutes (modeled)."
         )
+    for hid, consult_ids in ctx.stranded.items():
+        if hid in ctx.gap_hospitals:
+            explanations.append(
+                f"{ctx.hospital_name(hid)} is short now: {', '.join(consult_ids)} "
+                f"{'is' if len(consult_ids) == 1 else 'are'} waiting with no eligible on-shift "
+                "physician (every credentialed physician is busy or excluded), so "
+                f"{len(consult_ids)} more physician{' is' if len(consult_ids) == 1 else 's are'} "
+                "needed there (re-checked as the clock moves)."
+            )
     if ctx.later_gaps:
         explanations.append(
             "Gaps that start later in the planning window are not acted on yet (re-checked as "

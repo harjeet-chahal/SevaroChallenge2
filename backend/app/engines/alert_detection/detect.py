@@ -856,9 +856,16 @@ def detect_coverage(ctx: DetectionContext) -> list[AlertDraft]:
                     ),
                     summary=hc.explanations[0],
                     action=RecommendedAction.PROPOSE_SPLIT_SHIFT,
-                    action_reason="Credentialed capacity is below the required level; the brief's "
-                    "intervention for a gap is a split-shift offer (requires clinical lead "
-                    "approval).",
+                    action_reason=(
+                        f"{', '.join(hc.stranded_consult_ids)} cannot be placed: every "
+                        "credentialed physician on duty here is busy or unavailable. The brief's "
+                        "intervention for a gap is a split-shift offer (requires clinical lead "
+                        "approval)."
+                        if hc.stranded_consult_ids
+                        else "Credentialed capacity is below the required level; the brief's "
+                        "intervention for a gap is a split-shift offer (requires clinical lead "
+                        "approval)."
+                    ),
                     category_rank=1,
                     category_reason="current coverage deficit",
                     urgency=m.deficit_physician_minutes / horizon,

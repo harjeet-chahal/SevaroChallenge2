@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -43,6 +43,14 @@ class OperationalAnalysis:
     coverage: CoverageReport
     alerts: AlertList
     metrics: OperationalMetrics
+    stranded: dict[str, list[str]] | None = None
+    """hospital_id -> urgent consults no one on duty can take now, already counted in the
+    coverage forecast. None: not evaluated (no ``stranded`` check was given)."""
+
+
+StrandedCheck = Callable[["OperationalAnalysis"], Mapping[str, Sequence[str]]]
+"""Given a first-pass analysis, the urgent consults per hospital that no one on duty can
+take (the routing optimizer supplies it; this module does not depend on Phase 4)."""
 
 
 def build_metrics(
@@ -130,7 +138,11 @@ def analyze_state(
     *,
     horizon_minutes: int | None = None,
     step_minutes: int | None = None,
+    stranded: StrandedCheck | None = None,
 ) -> OperationalAnalysis:
+    """``stranded``: when given, a second pass counts each urgent consult no one on duty can
+    take as one more physician needed at its hospital, for the whole forecast horizon (it is
+    re-checked every time the clock moves), then rebuilds the forecast and the alerts."""
     as_of = state.as_of
     horizon = horizon_minutes or config.coverage.horizon_minutes
     step = step_minutes or config.coverage.chart_step_minutes
@@ -154,7 +166,7 @@ def analyze_state(
     )
     ctx = context(state, config, coverage, demand, state.hospitals)
     alerts = rank_alerts(ctx, detect_all(ctx), state.data_version)
-    return OperationalAnalysis(
+    result = OperationalAnalysis(
         state=state,
         reference=reference,
         config=config,
@@ -165,6 +177,26 @@ def analyze_state(
         alerts=alerts,
         metrics=build_metrics(state, coverage, demand, alerts),
     )
+    if stranded is None:
+        return result
+    found = {
+        hid: list(ids) for hid, ids in stranded(result).items() if ids and hid in coverage_models
+    }
+    result.stranded = found
+    if not found:
+        return result
+    horizon_end = as_of + timedelta(minutes=horizon)
+    for hid, ids in found.items():
+        coverage_models[hid].add_stranded(ids, horizon_end)
+    coverage = build_coverage_report(
+        coverage_models, as_of, config.coverage, horizon, step, state.data_version
+    )
+    ctx = context(state, config, coverage, demand, state.hospitals)
+    alerts = rank_alerts(ctx, detect_all(ctx), state.data_version)
+    result.coverage = coverage
+    result.alerts = alerts
+    result.metrics = build_metrics(state, coverage, demand, alerts)
+    return result
 
 
 def analyze(
@@ -177,6 +209,7 @@ def analyze(
     horizon_minutes: int | None = None,
     step_minutes: int | None = None,
     overlay: Sequence[OverlayEntry] = (),
+    stranded: StrandedCheck | None = None,
 ) -> OperationalAnalysis:
     """``overlay``: accepted/activated split shifts from the Phase 5 workflow, applied
     time-aware on top of the replay so staffing, forecasts, alerts and optimizers all see
@@ -190,4 +223,5 @@ def analyze(
         config or RiskConfig(),
         horizon_minutes=horizon_minutes,
         step_minutes=step_minutes,
+        stranded=stranded,
     )

@@ -239,6 +239,18 @@ class HospitalCoverageModel:
     requirements: list[CoverageRequirement]
     demand: HospitalDemandModel | None
     contributors: list[CoverageContributor] = field(default_factory=list)
+    stranded_need: list[tuple[datetime, datetime, int]] = field(default_factory=list)
+    """(start, end, n): while it applies, the hospital needs at least n physicians beyond
+    those scheduled there (urgent consults no one on duty can take; see ``add_stranded``).
+    Proposed windows still count against it."""
+    stranded_consult_ids: tuple[str, ...] = ()
+
+    def add_stranded(self, consult_ids: Sequence[str], until: datetime) -> None:
+        """Urgent consults that no one on duty can take right now: until ``until`` the
+        hospital needs one more physician than are scheduled there for each of them."""
+        if consult_ids:
+            self.stranded_need.append((self.as_of, until, len(consult_ids)))
+            self.stranded_consult_ids = tuple(consult_ids)
 
     @property
     def tz(self) -> str:
@@ -260,6 +272,10 @@ class HospitalCoverageModel:
         if self.demand is not None:
             adjustment = self.demand.evaluate(moment).requirement_adjustment
         required = None if base is None else base + (adjustment or 0)
+        need = sum(n for a, b, n in self.stranded_need if a <= moment < b)
+        if need and required is not None:
+            scheduled = {w.physician_id for w in self.windows if w.covers(moment)}
+            required = max(required, len(scheduled) + need)
         # One physician counts at most once per hospital, even if several windows overlap
         # (e.g. a hypothetical what-if window on top of a scheduled one). Confirmed wins.
         by_physician: dict[str, Window] = {}
@@ -288,6 +304,8 @@ class HospitalCoverageModel:
         points.update(t for t in zone_transitions(self.tz, start, end) if t < end)
         if self.demand is not None:
             points.update(self.demand.change_points(start, end))
+        for a, b, _ in self.stranded_need:
+            points.update(t for t in (a, b) if start < t < end)
         return sorted(points)
 
     def evaluations(self, extra: Iterable[Window] = ()) -> list[tuple[datetime, datetime, _Eval]]:
@@ -533,6 +551,14 @@ def build_hospital_coverage(
             f"No coverage requirement is defined for {hospital.name} in this horizon; gaps "
             "cannot be evaluated."
         )
+    elif now.deficit and model.stranded_consult_ids:
+        ids = model.stranded_consult_ids
+        explanations.append(
+            f"Short now: {', '.join(ids)} {'is' if len(ids) == 1 else 'are'} waiting and every "
+            "credentialed physician on duty here is busy or unavailable, so "
+            f"{len(ids)} more physician{' is' if len(ids) == 1 else 's are'} needed "
+            f"({now.available} available vs {now.required} required)."
+        )
     elif now.deficit:
         explanations.append(
             f"Coverage is below requirement now: {now.available} available vs {now.required} "
@@ -604,6 +630,7 @@ def build_hospital_coverage(
         annotations=annotations,
         contributors=model.contributors,
         explanations=explanations,
+        stranded_consult_ids=list(model.stranded_consult_ids),
     )
 
 

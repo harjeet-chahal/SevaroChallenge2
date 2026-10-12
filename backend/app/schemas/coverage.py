@@ -128,6 +128,9 @@ class HospitalCoverage(ApiModel):
     annotations: list[CoverageAnnotation]
     contributors: list[CoverageContributor]
     explanations: list[str]
+    stranded_consult_ids: list[EntityId] = Field(default_factory=list)
+    """Urgent consults no one on duty here can take now. Each needs one more physician than
+    are on duty, so the hospital is short now even if busy physicians cover the minimum."""
 
 
 class CoverageReport(ApiModel):

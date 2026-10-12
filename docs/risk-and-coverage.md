@@ -138,6 +138,19 @@ Regular 5-minute samples are added for the chart only.
 | Not credentialed at the hospital | **no** (listed with reason) | — |
 | Credentialed at several hospitals | yes, at **each** (non-exclusive, as the brief defines coverage) | — |
 
+**Stranded stroke consults (second pass, ASSUMPTION).** Busy physicians count as
+capacity, so a hospital whose credentialed doctors are all busy can look covered while its
+strokes wait. After the first pass, the routing optimizer is asked which urgent consults
+(`staffing.stranded_urgent_categories`, default `["stroke"]`) need a physician, already
+have an alert, and cannot be placed. For a hospital with *n* of them,
+R(t) = max(R(t), physicians scheduled there at t + *n*) for the whole horizon, so it is short
+**now** by at least *n*; then the forecast, alerts and metrics are rebuilt. It is
+re-checked whenever the clock moves, and it does not apply while a credentialed physician is
+held back only by the 2-minute call cool-down or a phone ringing for another call. The card
+reads "Short now: CON-2114, CON-2120 are waiting…", `stranded_consult_ids` lists them, and
+the gap alert recommends a split shift. The split-shift planner uses the same consults.
+`[]` switches it off (capacity only).
+
 Unknown shift ends are never replaced with made-up times. Deficits are reported both
 with all counted physicians and with confirmed coverage only
 (`deficit_physician_minutes_if_uncertain_excluded`).

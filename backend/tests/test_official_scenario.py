@@ -6,7 +6,10 @@ docs/official-scenario-audit.md. Skipped when the folder is absent.
 
 Coverage is credentialed on-duty capacity: a physician on a call or video still counts,
 while Temporarily Unavailable does not. Being free right now is a routing concept, kept
-separate (see the audit, section 2).
+separate (see the audit, section 2). The split-shift planner adds one exception: a stroke
+consult that no one on duty can take makes its hospital short now
+(``staffing.stranded_urgent_categories``). Tests marked "capacity only" switch it off to pin
+the capacity forecast on its own.
 """
 
 from __future__ import annotations
@@ -84,20 +87,37 @@ def _first_received() -> dict[str, tuple[datetime, str]]:
     return first
 
 
-@pytest.fixture(scope="module")
-def official(tmp_path_factory):
-    db = tmp_path_factory.mktemp("official") / "official.db"
+CAPACITY_ONLY_POLICY = '{"staffing": {"stranded_urgent_categories": []}}'
+
+
+def _official_client(folder: Path, *, capacity_only: bool = False):
+    policy = None
+    if capacity_only:
+        policy = folder / "policy.json"
+        policy.write_text(CAPACITY_ONLY_POLICY, encoding="utf-8")
     settings = Settings(
         _env_file=None,
         app_env="test",
-        database_url=f"sqlite:///{db}",
+        database_url=f"sqlite:///{folder / 'official.db'}",
         cors_origins="http://localhost:3000",
+        optimization_policy_file=policy,
     )
     with TestClient(create_app(settings)) as client:
         files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
         response = upload(client, files)
         assert response.status_code == 200, response.text
         yield client, settings
+
+
+@pytest.fixture(scope="module")
+def official(tmp_path_factory):
+    yield from _official_client(tmp_path_factory.mktemp("official"))
+
+
+@pytest.fixture(scope="module")
+def official_capacity(tmp_path_factory):
+    """Capacity only: stranded stroke consults are not counted in the forecast."""
+    yield from _official_client(tmp_path_factory.mktemp("capacity"), capacity_only=True)
 
 
 @pytest.fixture(scope="module")
@@ -117,16 +137,43 @@ def analysis_1820(inputs):
     return analyze(events, reference, NOW, load_risk_config(None))
 
 
-def _staffing(inputs, *, at: datetime = NOW, lookahead_minutes: int | None = None):
-    """Default policy unless a shortage look-ahead is given (planning window unchanged)."""
+def _staffing(
+    inputs,
+    *,
+    at: datetime = NOW,
+    lookahead_minutes: int | None = None,
+    capacity_only: bool = False,
+):
+    """Default policy unless a shortage look-ahead is given (planning window unchanged).
+    ``capacity_only``: stranded stroke consults do not count as a shortage."""
     events, reference = inputs
     analysis = analyze(events, reference, at, load_risk_config(None))
     cfg = load_optimization_config(None)
+    update: dict = {}
     if lookahead_minutes is not None:
-        staffing = cfg.staffing.model_copy(update={"shortage_lookahead_minutes": lookahead_minutes})
-        cfg = cfg.model_copy(update={"staffing": staffing})
+        update["shortage_lookahead_minutes"] = lookahead_minutes
+    if capacity_only:
+        update["stranded_urgent_categories"] = []
+    if update:
+        cfg = cfg.model_copy(update={"staffing": cfg.staffing.model_copy(update=update)})
     result, _ = run_staffing(analysis, cfg)
     return result
+
+
+@pytest.fixture
+def capacity_client(tmp_path):
+    """An API client whose split-shift planner ignores stranded consults (capacity only)."""
+    policy = tmp_path / "policy.json"
+    policy.write_text(CAPACITY_ONLY_POLICY, encoding="utf-8")
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'capacity.db'}",
+        cors_origins="http://localhost:3000",
+        optimization_policy_file=policy,
+    )
+    with TestClient(create_app(settings)) as client:
+        yield client
 
 
 # --- 1. Import and replay ---------------------------------------------------------------
@@ -241,8 +288,8 @@ REQUIRED_1820 = {
 }
 
 
-def test_capacity_forecast_has_no_gap_through_1950(official):
-    client, _ = official
+def test_capacity_forecast_has_no_gap_through_1950(official_capacity):
+    client, _ = official_capacity
     report = client.get("/api/coverage").json()
     assert report["horizon_minutes"] == 90
     for h in report["hospitals"]:
@@ -253,8 +300,8 @@ def test_capacity_forecast_has_no_gap_through_1950(official):
         assert m["deficit_physician_minutes"] == 0 and m["first_shortfall_at"] is None, hid
 
 
-def test_suncrest_oak_valley_and_redwood_traces(official, analysis_1820):
-    client, _ = official
+def test_suncrest_oak_valley_and_redwood_traces(official_capacity, analysis_1820):
+    client, _ = official_capacity
     report = {h["hospital_id"]: h for h in client.get("/api/coverage").json()["hospitals"]}
     arrivals = sorted(at for at, hid in _first_received().values() if hid == "SYN-005")
     recent = [a for a in arrivals if NOW - timedelta(minutes=60) < a <= NOW]
@@ -280,8 +327,8 @@ def test_suncrest_oak_valley_and_redwood_traces(official, analysis_1820):
     assert "Temporarily Unavailable" in reasons["PHY-008"][0]
 
 
-def test_first_capacity_gaps_follow_the_20_00_and_21_00_shift_ends(official):
-    client, _ = official
+def test_first_capacity_gaps_follow_the_20_00_and_21_00_shift_ends(official_capacity):
+    client, _ = official_capacity
     report = client.get("/api/coverage", params={"horizon_minutes": 240}).json()
     gaps = {
         h["hospital_id"]: (
@@ -408,13 +455,13 @@ def test_at_1820_the_top_alert_recommends_an_action_that_can_be_taken(official, 
     assert preview.json()["valid"] is False  # the reassignment it no longer recommends
 
 
-def test_at_1820_no_hospital_is_short_within_90_minutes_so_nobody_is_called(official):
-    client, _ = official
-    staffing = client.get("/api/optimization/split-shifts").json()
-    assert staffing["gap_hospital_ids"] == []
-    assert staffing["recommendations"] == []
-    assert all("credentialed_at_gap" in c["failed_rules"] for c in staffing["candidates"])
-    later = next(e for e in staffing["explanations"] if "not acted on yet" in e)
+def test_at_1820_capacity_alone_shows_no_gap_within_90_minutes(inputs):
+    """Capacity only: every hospital has enough credentialed doctors on duty until 20:00."""
+    result = _staffing(inputs, capacity_only=True)
+    assert result.gap_hospital_ids == []
+    assert result.recommendations == []
+    assert all("credentialed_at_gap" in c.failed_rules for c in result.candidates)
+    later = next(e for e in result.explanations if "not acted on yet" in e)
     # Northfield 20:00 EDT, Cedar Ridge 21:00 ET = 20:00 CDT, Redwood 21:00 ET = 18:00 PDT.
     for text in (
         "Northfield Medical from 20:00 EDT",
@@ -422,16 +469,60 @@ def test_at_1820_no_hospital_is_short_within_90_minutes_so_nobody_is_called(offi
         "Redwood University Medical Center from 18:00 PDT",
     ):
         assert text in later
-    refused = client.post("/api/interventions", headers=COORD, json={"type": "split_shift"})
-    assert refused.status_code == 422
-    (reason,) = refused.json()["error"]["details"]["blocking_reasons"]
-    assert reason.startswith("No coverage gap at any hospital in the next 90 min")
 
 
-def test_at_1831_exactly_one_off_shift_physician_can_be_asked(inputs):
-    """At 18:31 Northfield's 20:00 gap (1 of 2 doctors) is inside the 90-minute look-ahead;
-    Cedar Ridge and Redwood (21:00) are not yet."""
-    result = _staffing(inputs, at=NOW + timedelta(minutes=11))
+def test_at_1820_the_dashboard_shows_the_stranded_strokes_as_gaps_now(official):
+    """The forecast counts the same stranded strokes, so the coverage cards, the gap alerts
+    and the split-shift planner agree on which hospitals are short."""
+    client, _ = official
+    report = {h["hospital_id"]: h for h in client.get("/api/coverage").json()["hospitals"]}
+    short = {hid: h for hid, h in report.items() if h["metrics"]["deficit_now"]}
+    assert {hid: h["stranded_consult_ids"] for hid, h in short.items()} == {
+        "SYN-005": ["CON-2114"],
+        "SYN-010": ["CON-2105"],
+        "SYN-011": ["CON-2110"],
+    }
+    # One physician more than the credentialed doctors on duty (all busy or unavailable).
+    for hid, h in short.items():
+        m = h["metrics"]
+        assert (m["required_now"], m["deficit_now"]) == (len(CAPACITY_1820[hid]) + 1, 1), hid
+        assert h["explanations"][0].startswith(f"Short now: {h['stranded_consult_ids'][0]} ")
+    alerts = {a["alert_id"]: a for a in client.get("/api/alerts").json()["alerts"]}
+    for hid in short:
+        gap = alerts[f"COVERAGE_GAP_NOW:hospital:{hid}"]
+        assert gap["recommended_action_type"] == "propose_split_shift"
+        assert "cannot be placed" in gap["recommended_action_reason"]
+    assert client.get("/api/metrics").json()["coverage"]["gap_now"] == 3
+
+
+def test_at_1820_stranded_strokes_make_three_hospitals_short_and_only_okafor_can_be_asked(
+    official,
+):
+    """Every doctor credentialed for CON-2114 (Suncrest), CON-2105 (Oak Valley) and CON-2110
+    (Harbor, its doctor Temporarily Unavailable) is busy, so those hospitals are short now.
+    Okafor is the one off-shift doctor every rule allows; she is not credentialed at Harbor."""
+    client, _ = official
+    staffing = client.get("/api/optimization/split-shifts").json()
+    assert staffing["gap_hospital_ids"] == ["SYN-005", "SYN-010", "SYN-011"]
+    for hospital, consult in (
+        ("Suncrest Medical Pavilion", "CON-2114"),
+        ("Oak Valley Medical", "CON-2105"),
+        ("Harbor Regional", "CON-2110"),
+    ):
+        assert any(
+            e.startswith(f"{hospital} is short now: {consult} ") for e in staffing["explanations"]
+        )
+    rows = {c["physician_id"]: c for c in staffing["candidates"]}
+    assert {pid for pid, c in rows.items() if c["eligible"]} == {"PHY-009"}
+    assert rows["PHY-009"]["gap_hospital_ids"] == ["SYN-005", "SYN-010"]
+    (rec,) = staffing["recommendations"]
+    assert (rec["physician_id"], rec["hospital_ids"]) == ("PHY-009", ["SYN-005", "SYN-010"])
+
+
+def test_at_1831_capacity_alone_makes_okafor_the_one_physician_to_ask(inputs):
+    """Capacity only: at 18:31 Northfield's 20:00 gap (1 of 2 doctors) is inside the
+    90-minute look-ahead; Cedar Ridge and Redwood (21:00) are not yet."""
+    result = _staffing(inputs, at=NOW + timedelta(minutes=11), capacity_only=True)
     assert result.gap_hospital_ids == ["SYN-008"]
     rows = {c.physician_id: c for c in result.candidates}
     expected = {
@@ -459,9 +550,10 @@ def test_require_full_coverage_only_binds_the_hospitals_short_within_the_look_ah
     events, reference = inputs
     analysis = analyze(events, reference, NOW + timedelta(minutes=11), load_risk_config(None))
     cfg = load_optimization_config(None)
-    strict = cfg.model_copy(
-        update={"staffing": cfg.staffing.model_copy(update={"require_full_coverage": True})}
+    staffing = cfg.staffing.model_copy(
+        update={"require_full_coverage": True, "stranded_urgent_categories": []}
     )
+    strict = cfg.model_copy(update={"staffing": staffing})
     result, _ = run_staffing(analysis, strict)
 
     # Cedar Ridge and Redwood (21:00) are later gaps, not acted on yet: they must not make
@@ -484,7 +576,7 @@ def test_require_full_coverage_only_binds_the_hospitals_short_within_the_look_ah
 def test_eligible_set_at_1820_depends_only_on_the_shortage_look_ahead(
     inputs, lookahead_minutes, eligible
 ):
-    result = _staffing(inputs, lookahead_minutes=lookahead_minutes)
+    result = _staffing(inputs, lookahead_minutes=lookahead_minutes, capacity_only=True)
     assert {c.physician_id for c in result.candidates if c.eligible} == eligible
 
 
@@ -495,7 +587,7 @@ def test_eligible_set_at_1820_depends_only_on_the_shortage_look_ahead(
 def test_with_the_default_90_minute_look_ahead_the_eligible_set_follows_the_clock(
     inputs, minutes_after, eligible
 ):
-    result = _staffing(inputs, at=NOW + timedelta(minutes=minutes_after))
+    result = _staffing(inputs, at=NOW + timedelta(minutes=minutes_after), capacity_only=True)
     assert {c.physician_id for c in result.candidates if c.eligible} == eligible
 
 
@@ -595,6 +687,111 @@ def test_judge_csv_appends_to_the_official_day_without_resetting_anything(client
     ]
 
 
+# The judges' test file (c2_new_events.csv): CON-2120 is a new stroke at Suncrest, Williams
+# comes back and takes CON-2105, Patel's camera-off record arrives four minutes late, and one
+# row is sent twice.
+C2_NEW_EVENTS = (
+    "event_id,event_time,ingested_at,consult_id,event_type,physician_id,hospital_id,description\n"
+    "EVT-01164,2026-03-17T18:22:00-04:00,2026-03-17T18:22:02-04:00,CON-2120,consult_received,,"
+    "SYN-005,Stroke consult request received\n"
+    "EVT-01165,2026-03-17T18:23:10-04:00,2026-03-17T18:23:12-04:00,CON-2120,consult_triaged,,"
+    "SYN-005,Consult triaged\n"
+    "EVT-01166,2026-03-17T18:23:15-04:00,2026-03-17T18:23:17-04:00,CON-2120,"
+    "routing_attempt_failed,,SYN-005,No available credentialed provider; retry scheduled\n"
+    "EVT-01165,2026-03-17T18:23:10-04:00,2026-03-17T18:23:19-04:00,CON-2120,consult_triaged,,"
+    "SYN-005,Consult triaged\n"
+    "EVT-01167,2026-03-17T18:24:10-04:00,2026-03-17T18:24:12-04:00,CON-2105,"
+    "routing_attempt_failed,,SYN-010,No available credentialed provider; retry scheduled\n"
+    "EVT-01168,2026-03-17T18:21:30-04:00,2026-03-17T18:25:40-04:00,,camera_inactive,PHY-001,,"
+    "Desktop agent: camera inactive\n"
+    "EVT-01169,2026-03-17T18:26:00-04:00,2026-03-17T18:26:01-04:00,,physician_status_changed,"
+    "PHY-008,,Self-reported status: Available\n"
+    "EVT-01170,2026-03-17T18:26:40-04:00,2026-03-17T18:26:42-04:00,CON-2105,physician_assigned,"
+    "PHY-008,SYN-010,Consult assigned\n"
+    "EVT-01171,2026-03-17T18:26:55-04:00,2026-03-17T18:26:57-04:00,CON-2105,"
+    "incoming_call_started,PHY-008,SYN-010,Hospital calls assigned physician\n"
+)
+
+
+@pytest.fixture
+def at_1827(client):
+    files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
+    assert upload(client, files).status_code == 200
+    appended = client.post(
+        "/api/events/csv", files={"file": ("c2.csv", io.BytesIO(C2_NEW_EVENTS.encode()))}
+    )
+    assert appended.status_code == 201, appended.text
+    assert (appended.json()["accepted"], appended.json()["duplicates"]) == (8, 1)
+    assert client.post("/api/simulation/advance", json={"minutes": 7}).status_code == 200
+    return client
+
+
+def test_at_1827_a_stalled_stroke_is_proposed_for_the_doctor_who_just_freed_up(at_1827):
+    """Williams was assigned CON-2110 at 18:07 and never called Harbor; back at 18:26 he took
+    CON-2105 instead. Patel (credentialed at Harbor) is free once her camera-off record lands,
+    so the routing plan proposes moving CON-2110 to her, matching the alert's action."""
+    client = at_1827
+    plan = client.get("/api/optimization/assignments").json()["plan"]
+    moves = {r["consult_id"]: r for r in plan["recommendations"]}
+    move = moves["CON-2110"]
+    assert (move["kind"], move["physician_id"], move["current_physician_id"]) == (
+        "reassign",
+        "PHY-001",
+        "PHY-008",
+    )
+    assert "now busy (incoming call)" in " ".join(move["explanation"])
+    alert = next(
+        a
+        for a in client.get("/api/alerts").json()["alerts"]
+        if a["alert_id"] == "STAGE_ASSIGNED_NOT_CONTACTED:consult:CON-2110"
+    )
+    assert alert["recommended_action_type"] == "reassign_consult"
+    preview = client.post(
+        "/api/interventions/preview",
+        headers=COORD,
+        json={"type": "reassign_consult", "alert_id": alert["alert_id"], "consult_id": "CON-2110"},
+    ).json()
+    assert preview["valid"] is True
+    assert preview["intervention"]["title"] == "Reassign CON-2110 to Dr. Maya Patel"
+
+
+def test_at_1827_two_stranded_strokes_at_suncrest_lead_to_an_okafor_split_shift(at_1827):
+    """CON-2114 and CON-2120 wait at Suncrest while Ramirez, Shah and Lee are all busy, so
+    Suncrest is short now (by two). Okafor is the one off-shift doctor who can be asked."""
+    client = at_1827
+    plan = client.get("/api/optimization/assignments").json()["plan"]
+    assert {u["consult_id"] for u in plan["unassigned"]} == {"CON-2114", "CON-2120"}
+    staffing = client.get("/api/optimization/split-shifts").json()
+    assert staffing["gap_hospital_ids"] == ["SYN-005"]
+    assert any(
+        e.startswith("Suncrest Medical Pavilion is short now: CON-2114, CON-2120 are waiting")
+        for e in staffing["explanations"]
+    )
+    assert {c["physician_id"] for c in staffing["candidates"] if c["eligible"]} == {"PHY-009"}
+    (rec,) = staffing["recommendations"]
+    assert (rec["physician_id"], rec["hospital_ids"]) == ("PHY-009", ["SYN-005"])
+    (ranking,) = staffing["rankings"]
+    assert ranking["hospital_ids"] == ["SYN-005"]
+
+    suncrest = client.get("/api/coverage/SYN-005").json()
+    assert suncrest["stranded_consult_ids"] == ["CON-2114", "CON-2120"]
+    assert (suncrest["metrics"]["available_now"], suncrest["metrics"]["deficit_now"]) == (3, 2)
+    short = [
+        h["hospital_id"]
+        for h in client.get("/api/coverage").json()["hospitals"]
+        if h["metrics"]["deficit_now"]
+    ]
+    assert short == ["SYN-005"]  # Harbor is fine once CON-2110 can go to Patel
+
+    created = client.post(
+        "/api/interventions",
+        headers=COORD,
+        json={"type": "split_shift", "alert_id": "COVERAGE_GAP_NOW:hospital:SYN-005"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["title"] == "Split shift: Dr. Grace Okafor for Suncrest Medical Pavilion"
+
+
 # --- 7. Split-shift follow-through on the official day -----------------------------------
 
 LEAD = {"X-Demo-Role": "clinical_lead", "X-Demo-Actor-Id": "lead-1"}
@@ -604,7 +801,7 @@ NORTHFIELD_GAP = "COVERAGE_GAP_PROJECTED:hospital:SYN-008"
 
 def _okafor_offer_sent(client) -> tuple[dict, dict]:
     """18:31: Northfield's 20:00 gap enters the look-ahead; Okafor is proposed, approved and
-    sent an offer. Returns (intervention, offer)."""
+    sent an offer. Returns (intervention, offer). Use with ``capacity_client``."""
     files = {p.name: p.read_bytes() for p in sorted(DATA.glob("*.csv"))}
     assert upload(client, files).status_code == 200
     assert client.post("/api/simulation/advance", json={"minutes": 11}).status_code == 200
@@ -626,7 +823,10 @@ def _okafor_offer_sent(client) -> tuple[dict, dict]:
     return created.json(), offer
 
 
-def test_after_okafor_declines_the_tool_says_escalate_instead_of_asking_her_again(client):
+def test_after_okafor_declines_the_tool_says_escalate_instead_of_asking_her_again(
+    capacity_client,
+):
+    client = capacity_client
     _, offer = _okafor_offer_sent(client)
     declined = client.post(
         f"/api/offers/{offer['id']}/respond", headers=OKAFOR, json={"response": "decline"}
@@ -650,7 +850,10 @@ def test_after_okafor_declines_the_tool_says_escalate_instead_of_asking_her_agai
     assert rows["PHY-009"]["failed_rules"] == ["not_declined"]
 
 
-def test_okafor_routing_count_is_set_at_go_live_from_the_physicians_working_then(client):
+def test_okafor_routing_count_is_set_at_go_live_from_the_physicians_working_then(
+    capacity_client,
+):
+    client = capacity_client
     created, offer = _okafor_offer_sent(client)
     # At proposal (18:31), the doctors covering Northfield now (Patel, Kim, Shah, Lee: 12-14
     # consults each) have all left by 20:00. Only Cho, whose night shift starts at 19:00,
